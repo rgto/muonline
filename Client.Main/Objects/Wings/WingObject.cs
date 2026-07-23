@@ -2,7 +2,7 @@ using Client.Main.Content;
 using Client.Main.Core.Utilities;
 using Client.Main.Models;
 using Client.Main.Objects.Effects;
-using Client.Data.BMD;
+using Client.Data.Model;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
@@ -181,7 +181,7 @@ namespace Client.Main.Objects.Wings
             ItemDefinition itemDefinition = ItemDatabase.GetItemDefinition(12, requestedItemIndex);
             string modelPath = itemDefinition?.TexturePath;
             bool isCape = requestedItemIndex == 30;
-            BMD resolvedModel = null;
+            ModelAsset resolvedModel = null;
 
             if (string.IsNullOrWhiteSpace(modelPath))
             {
@@ -281,7 +281,7 @@ namespace Client.Main.Objects.Wings
             return _isCapeLike ? this : null;
         }
 
-        public Vector3 DeformVertex(in BMDTextureVertex vertex, in Vector3 transformedPosition)
+        public Vector3 DeformVertex(in ModelVertex vertex, in Vector3 transformedPosition)
         {
             if (!_isCapeLike || !_capeHasExtents)
             {

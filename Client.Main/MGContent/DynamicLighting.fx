@@ -389,7 +389,10 @@ float4 PS_Terrain(PixelInput input) : SV_Target
     clip(finalAlpha - 0.01);
 
     float3 normal = PrepareNormal(input.Normal);
-    float3 baseLight = input.Color.rgb * GlobalLightMultiplier;
+    float3 bakedLight = input.Color.rgb * GlobalLightMultiplier;
+    // Piso de luz ambiente: garante o mesmo mínimo ambiente que os objetos
+    // (PS_Objects) já usam, evitando terreno preto caso o lightmap venha zerado.
+    float3 baseLight = max(bakedLight, AmbientLight);
 
     float3 finalLight = baseLight + input.DynamicLight * TerrainDynamicIntensityScale;
 

@@ -1125,6 +1125,44 @@ namespace Client.Main.Networking.PacketHandling.Handlers
             return Task.CompletedTask;
         }
 
+        [PacketHandler(0xF3, 0x53)] // MasterSkillList (lista inicial ao entrar no jogo)
+        public Task HandleMasterSkillListAsync(Memory<byte> packet)
+        {
+            try
+            {
+                // C2-header: [C2][len hi][len lo][F3][53][pad] count(uint LE)@6? — o layout
+                // do OpenMU: MasterSkillCount uint32 @8, entradas de 12B a partir de @12:
+                // number(ushort) @0, level(byte) @2, pad, displayValue(float) @4,
+                // nextDisplayValue(float) @8.
+                var span = packet.Span;
+                if (span.Length < 12) return Task.CompletedTask;
+                uint count = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(8, 4));
+                const int entrySize = 12;
+                int offset = 12;
+                for (int i = 0; i < count && offset + entrySize <= span.Length; i++, offset += entrySize)
+                {
+                    ushort number = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(offset, 2));
+                    byte level = span[offset + 2];
+                    float display = BitConverter.ToSingle(span.Slice(offset + 4, 4));
+                    float next = BitConverter.ToSingle(span.Slice(offset + 8, 4));
+                    _characterState.AddOrUpdateSkill(new SkillEntryState
+                    {
+                        SkillId = number,
+                        SkillLevel = level,
+                        DisplayValue = display,
+                        NextDisplayValue = next
+                    });
+                }
+                _logger.LogInformation("Ⓜ️ MasterSkillList: {Count} master skills carregadas.", count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "💥 Error parsing MasterSkillList packet.");
+            }
+
+            return Task.CompletedTask;
+        }
+
         [PacketHandler(0xF3, 0x52)] // MasterSkillLevelUpdate
         public Task HandleMasterSkillLevelUpdateAsync(Memory<byte> packet)
         {

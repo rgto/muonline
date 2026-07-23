@@ -183,7 +183,10 @@ namespace MuAndroid
             Constants.DRAW_GRASS = false;
             Constants.ENABLE_DYNAMIC_LIGHTS = false;
             Constants.ENABLE_DYNAMIC_LIGHTING_SHADER = true;
-            Constants.ENABLE_TERRAIN_GPU_LIGHTING = false;
+            // Terreno usa o MESMO shader dos objetos (DynamicLighting, funciona no GLES).
+            // Com false, o terreno caía no BasicEffect3D dependendo só do lightmap baked,
+            // que sai preto no Android -> chão preto. true rota o terreno pro shader iluminado.
+            Constants.ENABLE_TERRAIN_GPU_LIGHTING = true;
             Constants.OPTIMIZE_FOR_INTEGRATED_GPU = true;
             Constants.ENABLE_LOW_QUALITY_IN_LOGIN_SCENE = true;
             Constants.ENABLE_ITEM_MATERIAL_SHADER = true;

@@ -37,6 +37,13 @@ namespace Client.Main.Scenes
         // ──────────────────────────── Fields ────────────────────────────
         private readonly HeroObject _hero;
         private ModernBottomHud _modernHud;
+        private Controls.UI.Game.Hud.VirtualJoystickControl _joystick;
+        private Controls.UI.Game.Hud.TouchActionButtonsControl _touchActions;
+        private Controls.UI.Game.Hud.BottomBarControl _bottomBar;
+        private Controls.UI.Game.Hud.TouchMenuControl _touchMenu;
+        private Controls.UI.Game.Hud.SkillImprintControl _skillImprint;
+        private Controls.UI.Game.Hud.MasteryTreeControl _masteryTree;
+        private Controls.UI.Game.Hud.PotionImprintControl _potionImprint;
         private EquipmentDurabilityHud _equipmentDurabilityHud;
         private GameSceneMapController _mapController;
         private MapListControl _mapListControl;
@@ -73,6 +80,8 @@ namespace Client.Main.Scenes
         // Performance optimization fields - track object IDs for O(1) lookups
         // ───────────────────────── Properties ─────────────────────────
         public HeroObject Hero => _hero;
+        internal GameSceneSkillController SkillController => _skillController;
+        internal ModernBottomHud ModernHud => _modernHud;
         public ChatLogWindow ChatLog => _chatLog;
         public InventoryControl InventoryControl => _inventoryControl;
         public TradeControl TradeControl => TradeControl.Instance;
@@ -189,6 +198,49 @@ namespace Client.Main.Scenes
             _modernHud = new ModernBottomHud(characterState, _skillSelectionPanel);
             Controls.Add(_modernHud);
             _modernHud.BringToFront();
+
+            // Controles de toque (mobile Android + iOS): joystick (esq) + ataque/skill (dir).
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
+            {
+                _joystick = new Controls.UI.Game.Hud.VirtualJoystickControl();
+                Controls.Add(_joystick);
+                _joystick.BringToFront();
+
+                _touchActions = new Controls.UI.Game.Hud.TouchActionButtonsControl();
+                Controls.Add(_touchActions);
+                _touchActions.BringToFront();
+
+                // Barra inferior estilo MU Immortal (cristais HP/MP + exp + consumíveis).
+                _bottomBar = new Controls.UI.Game.Hud.BottomBarControl(characterState, _modernHud);
+                Controls.Add(_bottomBar);
+                _bottomBar.BringToFront();
+
+                // Skill Imprint (tela nova de skills) — abre pela entrada "Skill" (livro) do
+                // fold-out do menu. A tela antiga (SkillPanelControl) foi removida.
+                _skillImprint = new Controls.UI.Game.Hud.SkillImprintControl(characterState, _modernHud);
+                Controls.Add(_skillImprint);
+
+                // Potion Imprint (tela de config das 5 poções) — abre pela entrada "Potions".
+                _potionImprint = new Controls.UI.Game.Hud.PotionImprintControl(characterState, _modernHud);
+                Controls.Add(_potionImprint);
+
+                _touchMenu = new Controls.UI.Game.Hud.TouchMenuControl
+                {
+                    HotbarToHide = _touchActions,
+                    ImprintPanel = _skillImprint,
+                    PotionPanel = _potionImprint
+                };
+                Controls.Add(_touchMenu);
+                _touchMenu.BringToFront();
+                _skillImprint.BringToFront();
+                _potionImprint.BringToFront();
+            }
+
+            // Mastery (árvore de master skills) — tecla A ou ícone de árvore do fold-out.
+            // Fora do bloco mobile: vale pra desktop também.
+            _masteryTree = new Controls.UI.Game.Hud.MasteryTreeControl(characterState);
+            Controls.Add(_masteryTree);
+            _masteryTree.BringToFront();
 
             // Right-side low durability warnings (reference: item endurance icons)
             _equipmentDurabilityHud = new EquipmentDurabilityHud(characterState);

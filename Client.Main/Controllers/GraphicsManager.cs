@@ -1,4 +1,4 @@
-using Client.Main.Content;
+﻿using Client.Main.Content;
 using Client.Main.Graphics;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
@@ -22,6 +22,9 @@ namespace Client.Main.Controllers
 
         public SpriteBatch Sprite { get; private set; }
         public SpriteFont Font { get; private set; }
+
+        /// <summary>Mesma família em NEGRITO — ver Constants.FONT_BOLD_NAME.</summary>
+        public SpriteFont FontBold { get; private set; }
         public RenderTarget2D EffectRenderTarget { get; private set; }
         public Texture2D Pixel { get; private set; }
         public AlphaTestEffect AlphaTestEffectUI { get; private set; }
@@ -112,6 +115,7 @@ namespace Client.Main.Controllers
 
             Sprite = new SpriteBatch(_graphicsDevice);
             Font = _contentManager.Load<SpriteFont>(Constants.FONT_NAME);
+            FontBold = _contentManager.Load<SpriteFont>(Constants.FONT_BOLD_NAME);
         }
 
         private void InitializeFXAAEffect()

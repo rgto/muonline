@@ -527,10 +527,23 @@ namespace Client.Main.Controls
                 return;
 
             if (obj.Hidden)
+            {
                 RemoveVisibleObject(obj);
+            }
             else
+            {
+                // Mostrar um objeto que estava oculto: além de marcá-lo como position-dirty,
+                // força um rebuild completo do _visibleObjects. Objetos criados Hidden nunca
+                // entraram no set de visíveis; só o dirty-refresh não os traz de volta (ex.:
+                // personagens no pilar da tela de seleção — só o 1º renderizava).
                 _positionDirtyObjects.Add(obj);
+                UpdateSpatialRegistration(obj);
+                _dirtyVisibleObjects = true;
+            }
         }
+
+        /// <summary>Força a reconstrução da lista de objetos visíveis no próximo Update.</summary>
+        public void InvalidateVisibleObjects() => _dirtyVisibleObjects = true;
 
         private void OnObjectRemoved(object sender, ChildrenEventArgs<WorldObject> e)
         {

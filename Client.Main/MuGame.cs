@@ -373,6 +373,14 @@ namespace Client.Main
             // Configure screen size for mobile platforms AFTER graphics device is ready
             if (OperatingSystem.IsAndroid())
             {
+                // O GraphicsQualityManager resolve Auto->Low no Android e DESLIGA o
+                // ENABLE_TERRAIN_GPU_LIGHTING (preset Low/Medium), jogando o terreno no
+                // BasicEffect3D -> chão preto. Objetos usam o shader DynamicLighting e
+                // aparecem; o terreno precisa do MESMO caminho. Reforçamos aqui, DEPOIS
+                // do preset, para o terreno usar o shader iluminado (PS_Terrain c/ piso ambiente).
+                Constants.ENABLE_DYNAMIC_LIGHTING_SHADER = true;
+                Constants.ENABLE_TERRAIN_GPU_LIGHTING = true;
+
                 var screenSize = GetActualScreenSize();
                 _graphics.PreferredBackBufferWidth = screenSize.X;
                 _graphics.PreferredBackBufferHeight = screenSize.Y;
@@ -1124,7 +1132,7 @@ namespace Client.Main
         {
             activeSkillSlot = 3;
             skillSlots = new ushort?[13];
-            potionSlots = new (byte Group, int Id)?[3];
+            potionSlots = new (byte Group, int Id)?[5]; // 3 poções Q/W/E + 2 extras da hotbar de itens (tela Skill Settings)
 
             string key = NormalizeQuickSlotCharacterKey(characterName);
             if (key == null)
@@ -1262,6 +1270,93 @@ namespace Client.Main
             catch (Exception ex)
             {
                 logger?.LogWarning(ex, "Failed to persist quick slot assignments for character {CharacterName}.", characterName);
+            }
+        }
+
+        /// <summary>Persiste os dois conjuntos da tela Skill Imprint (Set 1 = 4, Set 2 = 7)
+        /// e o set ativo, no MESMO bloco QuickSlots[char] das quick slots.</summary>
+        public static void PersistImprintSets(
+            string characterName,
+            int activeSet,
+            IReadOnlyList<ushort?> set1,
+            IReadOnlyList<ushort?> set2)
+        {
+            string key = NormalizeQuickSlotCharacterKey(characterName);
+            if (key == null) return;
+
+            var logger = AppLoggerFactory?.CreateLogger<MuGame>();
+            try
+            {
+                Directory.CreateDirectory(ConfigDirectory ?? AppContext.BaseDirectory);
+                JsonObject root = LoadLocalSettings(logger);
+                if (root["MuOnlineSettings"] is not JsonObject muSettings)
+                { muSettings = new JsonObject(); root["MuOnlineSettings"] = muSettings; }
+                if (muSettings["Ui"] is not JsonObject uiSettings)
+                { uiSettings = new JsonObject(); muSettings["Ui"] = uiSettings; }
+                if (uiSettings["QuickSlots"] is not JsonObject quickSlots)
+                { quickSlots = new JsonObject(); uiSettings["QuickSlots"] = quickSlots; }
+                if (quickSlots[key] is not JsonObject entry)
+                { entry = new JsonObject { ["CharacterName"] = characterName.Trim() }; quickSlots[key] = entry; }
+
+                JsonArray Ids(IReadOnlyList<ushort?> src)
+                {
+                    var a = new JsonArray();
+                    for (int i = 0; i < src.Count; i++)
+                        a.Add(src[i].HasValue ? JsonValue.Create(src[i]!.Value) : null);
+                    return a;
+                }
+
+                entry["ActiveSet"] = activeSet;
+                entry["ImprintSet1"] = Ids(set1);
+                entry["ImprintSet2"] = Ids(set2);
+
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                File.WriteAllText(LocalSettingsPath, root.ToJsonString(options));
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to persist imprint sets for character {CharacterName}.", characterName);
+            }
+        }
+
+        /// <summary>Carrega os conjuntos da tela Skill Imprint. Retorna false se não houver.</summary>
+        public static bool TryLoadImprintSets(
+            string characterName,
+            out int activeSet,
+            out ushort?[] set1,
+            out ushort?[] set2)
+        {
+            activeSet = 1; set1 = new ushort?[4]; set2 = new ushort?[7];
+            string key = NormalizeQuickSlotCharacterKey(characterName);
+            if (key == null) return false;
+
+            var logger = AppLoggerFactory?.CreateLogger<MuGame>();
+            try
+            {
+                JsonObject root = LoadLocalSettings(logger);
+                if (root["MuOnlineSettings"] is not JsonObject muSettings) return false;
+                if (muSettings["Ui"] is not JsonObject uiSettings) return false;
+                if (uiSettings["QuickSlots"] is not JsonObject quickSlots) return false;
+                if (quickSlots[key] is not JsonObject entry) return false;
+                if (entry["ImprintSet1"] is not JsonArray && entry["ImprintSet2"] is not JsonArray)
+                    return false;
+
+                if (entry["ActiveSet"] is JsonValue av && av.TryGetValue(out int s)) activeSet = s;
+                ReadIds(entry["ImprintSet1"] as JsonArray, set1);
+                ReadIds(entry["ImprintSet2"] as JsonArray, set2);
+                return true;
+
+                static void ReadIds(JsonArray arr, ushort?[] dst)
+                {
+                    if (arr == null) return;
+                    for (int i = 0; i < dst.Length && i < arr.Count; i++)
+                        dst[i] = arr[i] is JsonValue v && v.TryGetValue(out ushort id) ? id : (ushort?)null;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to load imprint sets for character {CharacterName}.", characterName);
+                return false;
             }
         }
 

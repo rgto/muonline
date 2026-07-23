@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using Microsoft.Xna.Framework;
 
 namespace Client.Main.Content
@@ -8,7 +8,7 @@ namespace Client.Main.Content
     /// </summary>
     public interface IVertexDeformer
     {
-        Vector3 DeformVertex(in BMDTextureVertex vertex, in Vector3 transformedPosition);
+        Vector3 DeformVertex(in ModelVertex vertex, in Vector3 transformedPosition);
     }
 }
 

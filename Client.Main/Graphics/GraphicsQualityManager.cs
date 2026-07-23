@@ -121,8 +121,14 @@ namespace Client.Main.Graphics
                     Constants.RENDER_SCALE = 0.75f;
                     Constants.MSAA_ENABLED = false;
                     Constants.ENABLE_DYNAMIC_LIGHTS = false;
-                    Constants.ENABLE_DYNAMIC_LIGHTING_SHADER = false;
-                    Constants.ENABLE_TERRAIN_GPU_LIGHTING = false;
+                    // Android PRECISA do shader de iluminação dinâmica: (1) sem ele o
+                    // terreno cai no BasicEffect e sai preto (ver ApplyAndroidDefaults);
+                    // (2) o caminho sem shader QUEBRA a geometria dos monstros glb
+                    // skinados (amassados/derretidos ao animar — reproduzido no viewer:
+                    // preset Low no desktop = exatamente o defeito do device). O preset
+                    // Low rodava DEPOIS do ApplyAndroidDefaults e desfazia o true.
+                    Constants.ENABLE_DYNAMIC_LIGHTING_SHADER = OperatingSystem.IsAndroid();
+                    Constants.ENABLE_TERRAIN_GPU_LIGHTING = OperatingSystem.IsAndroid();
                     Constants.OPTIMIZE_FOR_INTEGRATED_GPU = true;
                     Constants.HIGH_QUALITY_TEXTURES = false;
                     Constants.DRAW_GRASS = false;

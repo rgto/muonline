@@ -148,6 +148,7 @@ namespace Client.Main.Scenes
             hotkeys.OnKeyPressed(Keys.I, ToggleInventory, when: WhenNotUiInput);
             hotkeys.OnKeyPressed(Keys.V, ToggleInventory, when: WhenNotUiInput);
             hotkeys.OnKeyPressed(Keys.C, ToggleCharacterInfo, when: WhenNotUiInput);
+            hotkeys.OnKeyPressed(Keys.A, ToggleMasteryTree, when: WhenNotUiInput);
             hotkeys.OnKeyPressed(Keys.M, ToggleMoveCommand, when: WhenNotUiInput);
             hotkeys.OnKeyPressed(Keys.Enter, OpenChatInput, when: WhenNotUiInput);
         }
@@ -238,6 +239,11 @@ namespace Client.Main.Scenes
             {
                 SoundController.Instance.PlayBuffer("Sound/iCreateWindow.wav");
             }
+        }
+
+        private void ToggleMasteryTree(HotkeyContext context)
+        {
+            Controls.UI.Game.Hud.MasteryTreeControl.Instance?.Toggle();
         }
 
         private void ToggleMoveCommand(HotkeyContext context)

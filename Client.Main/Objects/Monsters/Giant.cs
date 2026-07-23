@@ -67,7 +67,7 @@ namespace Client.Main.Objects.Monsters
                 int dieActionIndex = (int)MonsterActionType.Die;
                 if (IsValidAction(dieActionIndex))
                 {
-                    // Assuming BMDTextureAction has a bool Loop field
+                    // Assuming ModelAction has a bool Loop field
                     // Model.Actions[dieActionIndex].Loop = true;
                     _logger?.LogDebug($" - Action Die ({dieActionIndex}) should be looped (C++ logic).");
                     // Note: Looping the death animation may be undesirable in game logic.

@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Main.Controllers;
 using Client.Main.Graphics;
 using Microsoft.Xna.Framework;
@@ -95,7 +95,7 @@ namespace Client.Main.Objects.Effects
             if (endAlpha.HasValue) _endColor.W = MathHelper.Clamp(endAlpha.Value, 0f, 1f);
         }
 
-        public void SetTipFromModel(BMD model)
+        public void SetTipFromModel(ModelAsset model)
         {
             if (model?.Meshes == null)
             {

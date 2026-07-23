@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Main.Models;
 using Client.Main.Objects.Player;
 using Microsoft.Xna.Framework;
@@ -8,7 +8,7 @@ namespace Client.Main.Objects.Worlds.Atlans
 {
     public class RestPlaceObject : ModelObject
     {
-        private static readonly BMD _dummyBmd = new BMD();
+        private static readonly ModelAsset _dummyBmd = new ModelAsset();
 
         private bool isWaitingForPlayerArrival = false;
         private Vector2 targetTile;

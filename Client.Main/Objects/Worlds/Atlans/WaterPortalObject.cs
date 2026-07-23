@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Threading.Tasks;
-using Client.Data.BMD;
+using Client.Data.Model;
 
 namespace Client.Main.Objects.Worlds.Atlans
 {
@@ -18,8 +18,8 @@ namespace Client.Main.Objects.Worlds.Atlans
         private float _currentOffset = 0f;
         private float _waveTime = 0f;
         // Removed fixed time step accumulation for texture offset
-        private BMDTexCoord[] _originalTexCoords;
-        private BMDTextureVertex[] _originalVertices;
+        private ModelTexCoordShim[] _originalTexCoords;
+        private ModelVertex[] _originalVertices;
         private System.Numerics.Vector3[] _vertexOffsets;
         protected override bool UsesMutableMeshData => true;
 
@@ -37,10 +37,10 @@ namespace Client.Main.Objects.Worlds.Atlans
             if (Model?.Meshes != null && Model.Meshes.Length > 0)
             {
                 var mesh = Model.Meshes[0];
-                _originalTexCoords = new BMDTexCoord[mesh.TexCoords.Length];
+                _originalTexCoords = new ModelTexCoordShim[mesh.TexCoords.Length];
                 Array.Copy(mesh.TexCoords, _originalTexCoords, mesh.TexCoords.Length);
 
-                _originalVertices = new BMDTextureVertex[mesh.Vertices.Length];
+                _originalVertices = new ModelVertex[mesh.Vertices.Length];
                 Array.Copy(mesh.Vertices, _originalVertices, mesh.Vertices.Length);
 
                 _vertexOffsets = new System.Numerics.Vector3[mesh.Vertices.Length];

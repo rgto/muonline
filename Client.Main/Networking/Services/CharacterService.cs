@@ -989,6 +989,29 @@ namespace Client.Main.Networking.Services
         }
 
         /// <summary>
+        /// Sends a request to spend one master point in a master skill (the server
+        /// validates points, rank and the level-10 prerequisite).
+        /// </summary>
+        public async Task SendAddMasterSkillPointRequestAsync(ushort skillId)
+        {
+            if (!_connectionManager.IsConnected)
+            {
+                _logger.LogError("Not connected — cannot send master skill point request.");
+                return;
+            }
+
+            try
+            {
+                await _connectionManager.Connection.SendAddMasterSkillPointAsync(skillId);
+                _logger.LogInformation("Master skill point request sent for skill {SkillId}.", skillId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending master skill point request for skill {SkillId}.", skillId);
+            }
+        }
+
+        /// <summary>
         /// Sends a request to pick up a dropped item or money by its network ID.
         /// </summary>
         /// <returns>True if the request was sent successfully, false otherwise.</returns>

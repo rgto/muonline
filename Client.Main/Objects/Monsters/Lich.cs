@@ -23,7 +23,8 @@ namespace Client.Main.Objects.Monsters
                 LinkParentAnimation = false,
                 ParentBoneLink = 41
             };
-            Children.Add(_rightHandWeapon);
+            if (System.Environment.GetEnvironmentVariable("MU_NO_WEAPON") != "1")
+                Children.Add(_rightHandWeapon);
         }
 
         public override async Task Load()

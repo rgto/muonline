@@ -35,6 +35,9 @@ namespace Client.Main.Scenes
         private NetworkManager _networkManager;
         private ILogger<LoginScene> _logger;
         private bool _uiInitialized = false; // Flag for one-time UI initialization
+        // Cancel intencional (voltar pra seleção de servidor): suprime o "Connection lost"
+        // + saída do jogo quando o Disconnect transitório do reconnect chegar.
+        private bool _intentionalReturnToServerSelection = false;
 
         // Constructors
         public LoginScene()
@@ -60,6 +63,7 @@ namespace Client.Main.Scenes
                 Align = ControlAlign.HorizontalCenter | ControlAlign.VerticalCenter
             };
             _loginDialog.LoginAttempt += LoginDialog_LoginAttempt;
+            _loginDialog.CancelAttempt += LoginDialog_CancelAttempt;
             Controls.Add(_loginDialog);
 
             // Server selection UI elements are initialized later in InitializeServerSelectionUI
@@ -256,6 +260,7 @@ namespace Client.Main.Scenes
                     case ClientConnectionState.ReceivedServerList:
                         if (!_uiInitialized) InitializeServerSelectionUI();
                         showServerSelectionUi = true;
+                        _intentionalReturnToServerSelection = false; // chegamos na seleção de servidor
                         _logger.LogDebug("HandleConnectionStateChange: Setting showServerSelectionUi = true");
                         break;
                     case ClientConnectionState.RequestingConnectionInfo:
@@ -281,7 +286,8 @@ namespace Client.Main.Scenes
                     case ClientConnectionState.Initial:
                         ResetServerSelectionUI();
                         hideAll = true;
-                        if (_previousStateHandled >= ClientConnectionState.ConnectingToConnectServer && _previousStateHandled < ClientConnectionState.InGame)
+                        if (!_intentionalReturnToServerSelection &&
+                            _previousStateHandled >= ClientConnectionState.ConnectingToConnectServer && _previousStateHandled < ClientConnectionState.InGame)
                         {
                             showErrorAndExit = true;
                         }
@@ -370,6 +376,23 @@ namespace Client.Main.Scenes
                 _logger.LogWarning("Login attempt ignored, invalid state: {State}", _networkManager.CurrentState);
                 MessageWindow.Show($"Cannot login in state: {_networkManager.CurrentState}");
             }
+        }
+
+        // Cancel no login: volta pra tela de seleção de servidor (imagem 2).
+        // Como já estamos ConnectedToGameServer, NÃO dá pra só re-pedir a lista — é preciso
+        // DESCONECTAR do game server e reconectar ao connect server, que reenvia a lista de
+        // servidores (ForceReconnect faz os dois e o fluxo de conexão re-pede a lista).
+        private void LoginDialog_CancelAttempt(object sender, EventArgs e)
+        {
+            _logger.LogInformation("Login cancelled: returning to server selection.");
+
+            if (_loginDialog != null) _loginDialog.Visible = false;
+
+            if (!_uiInitialized) InitializeServerSelectionUI();
+            UpdateUIVisibility(showServerSelectionUi: true, showLoginDialog: false, hideAll: false);
+
+            _intentionalReturnToServerSelection = true;
+            _ = _networkManager.ForceReconnectToConnectServerAsync();
         }
 
         private void HandleServerListReceived(object sender, List<ServerInfo> servers)

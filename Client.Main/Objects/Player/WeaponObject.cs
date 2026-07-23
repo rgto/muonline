@@ -4,7 +4,7 @@ using Client.Main.Content;
 using Client.Main.Objects.Effects;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xna.Framework;
-using Client.Data.BMD;
+using Client.Data.Model;
 using System;
 using System.Threading.Tasks;
 
@@ -97,6 +97,26 @@ namespace Client.Main.Objects.Player
 
         public override void Update(GameTime gameTime)
         {
+            // glTF migration: monster bodies used to be rigid BMDs that carried NO weapon, so the
+            // monster class attaches this WeaponObject at a hardcoded BMD hand-bone index. The new
+            // .glb bodies BAKE the weapon into the model (skinned body mesh + a rigid single-bone
+            // weapon mesh riding the hand). When the parent body already carries a baked weapon, the
+            // separately-attached WeaponObject is redundant and would show up as a SECOND weapon
+            // (either doubled at the hand, or — when the hardcoded bone index doesn't map onto the
+            // glb's smaller skeleton — stuck at the body's origin on the ground). Hide it in that
+            // case. BMD bodies (no baked weapon) and glb bodies that DON'T bake a weapon keep it.
+            if (ParentHasBakedWeapon())
+            {
+                if (!Hidden) Hidden = true;
+                _suppressedForBakedWeapon = true;
+                return;
+            }
+            if (Hidden && _suppressedForBakedWeapon)
+            {
+                Hidden = false;
+                _suppressedForBakedWeapon = false;
+            }
+
             if (_trail != null &&
                 (_trailLevelCache != ItemLevel || _trailExcellentCache != IsExcellentItem || _trailAncientCache != IsAncientItem))
             {
@@ -105,6 +125,127 @@ namespace Client.Main.Objects.Player
 
             base.Update(gameTime);
             // Force invalidation is now handled at parent level in ModelObject.Update()
+        }
+
+        private bool _suppressedForBakedWeapon;
+        private ModelAsset _bakedWeaponModelChecked;
+        private bool _bakedWeaponModelResult;
+
+        /// <summary>
+        /// True when the parent body's model already bakes its weapon into the geometry, making this
+        /// separately-attached WeaponObject redundant. A glTF body with a baked weapon has BOTH a
+        /// skinned body mesh (vertices spanning more than one bone) AND a rigid prop mesh (all
+        /// vertices bound to a single bone = the weapon riding the hand). A BMD body is entirely
+        /// rigid single-bone meshes (no skinned mesh) and carries no weapon, so it never matches and
+        /// keeps its attachment. A glTF body that bakes no weapon (skinned meshes only) also keeps it.
+        /// Result is cached per parent Model instance (the mesh set is immutable once loaded).
+        /// </summary>
+        private bool ParentHasBakedWeapon()
+        {
+            if (Parent is not ModelObject body)
+                return false;
+
+            var model = body.Model;
+            if (model?.Meshes == null || model.Meshes.Length < 2)
+                return false; // needs at least a body mesh + a weapon mesh
+
+            // HARD GATE: only a glTF/.glb body can bake its weapon into the geometry. Legacy .bmd
+            // monster bodies NEVER carry a weapon — the weapon is this separate WeaponObject
+            // attached at a hand bone, so it must ALWAYS stay visible for a .bmd parent. The old
+            // mesh-shape heuristic below could false-positive on a .bmd whose body happens to have
+            // single-bone sub-meshes, hiding the legitimate weapon (regression on the 19 degenerate
+            // monsters that fell back to .bmd — they lost their weapon). IsGltf is a file-level
+            // fact, so it can't leak.
+            if (!model.IsGltf)
+                return false;
+
+            if (ReferenceEquals(model, _bakedWeaponModelChecked))
+                return _bakedWeaponModelResult;
+
+            bool hasSkinnedBody = false;
+            bool hasRigidProp = false;
+            foreach (var mesh in model.Meshes)
+            {
+                if (MeshIsSingleBone(mesh))
+                    hasRigidProp = true;
+                else
+                    hasSkinnedBody = true;
+            }
+
+            // Also cover the FBX2glTF archer/crossbow rigs (Hunter etc.): their weapon is a
+            // SKINNED second mesh (its own bones), so it isn't a single-bone rigid prop. Detect
+            // it as a mesh whose bone set is DISJOINT from the body's — i.e. the model contains a
+            // separate skinned part (the bow) that the client's attached WeaponObject duplicates.
+            bool hasDisjointPart = HasDisjointSkinnedPart(model.Meshes);
+
+            _bakedWeaponModelChecked = model;
+            _bakedWeaponModelResult = (hasSkinnedBody && hasRigidProp) || hasDisjointPart;
+            return _bakedWeaponModelResult;
+        }
+
+        /// <summary>
+        /// True if the model has two skinned meshes bound to DISJOINT bone sets — the signature of
+        /// a baked weapon on the FBX2glTF archer rigs (body mesh + separately-skinned bow mesh).
+        /// The largest mesh is the body; if any other mesh shares NO bones with it, that mesh is a
+        /// baked prop and the client-attached weapon is redundant.
+        /// </summary>
+        private static bool HasDisjointSkinnedPart(ModelMesh[] meshes)
+        {
+            if (meshes.Length < 2) return false;
+
+            // Bones of the largest (vertex-count) mesh = the body.
+            ModelMesh body = meshes[0];
+            foreach (var m in meshes)
+                if ((m?.Vertices?.Length ?? 0) > (body?.Vertices?.Length ?? 0)) body = m;
+            var bodyBones = BonesOf(body);
+            if (bodyBones.Count == 0) return false;
+
+            foreach (var m in meshes)
+            {
+                if (ReferenceEquals(m, body)) continue;
+                var mb = BonesOf(m);
+                if (mb.Count > 0 && !mb.Overlaps(bodyBones))
+                    return true; // a separately-skinned part not sharing any body bone → prop
+            }
+            return false;
+        }
+
+        private static System.Collections.Generic.HashSet<short> BonesOf(ModelMesh mesh)
+        {
+            var set = new System.Collections.Generic.HashSet<short>();
+            if (mesh?.Vertices == null) return set;
+            foreach (var v in mesh.Vertices)
+            {
+                if (v.BoneWeights.X > 1e-4f) set.Add(v.BoneIndices.B0);
+                if (v.BoneWeights.Y > 1e-4f) set.Add(v.BoneIndices.B1);
+                if (v.BoneWeights.Z > 1e-4f) set.Add(v.BoneIndices.B2);
+                if (v.BoneWeights.W > 1e-4f) set.Add(v.BoneIndices.B3);
+            }
+            return set;
+        }
+
+        /// <summary>All (weighted) vertices reference exactly one distinct bone → a rigid prop.</summary>
+        private static bool MeshIsSingleBone(ModelMesh mesh)
+        {
+            if (mesh?.Vertices == null || mesh.Vertices.Length == 0)
+                return false;
+
+            short first = -1;
+            foreach (var v in mesh.Vertices)
+            {
+                if (v.BoneWeights.X > 1e-4f && DistinctBone(v.BoneIndices.B0, ref first)) return false;
+                if (v.BoneWeights.Y > 1e-4f && DistinctBone(v.BoneIndices.B1, ref first)) return false;
+                if (v.BoneWeights.Z > 1e-4f && DistinctBone(v.BoneIndices.B2, ref first)) return false;
+                if (v.BoneWeights.W > 1e-4f && DistinctBone(v.BoneIndices.B3, ref first)) return false;
+            }
+            return first >= 0; // at least one weighted bone, and never saw a second
+        }
+
+        // Returns true the moment a SECOND distinct bone index appears.
+        private static bool DistinctBone(short bone, ref short first)
+        {
+            if (first < 0) { first = bone; return false; }
+            return bone != first;
         }
 
         public override async Task LoadContent()
@@ -155,7 +296,7 @@ namespace Client.Main.Objects.Player
             return Vector3.Transform(_trailTipLocal, WorldPosition);
         }
 
-        private void ComputeTrailTip(BMD model)
+        private void ComputeTrailTip(ModelAsset model)
         {
             _trailTipBone = -1;
             _trailTipLocal = Vector3.Zero;
@@ -213,7 +354,7 @@ namespace Client.Main.Objects.Player
             }
         }
 
-        private static bool SelectTipVertex(BMD model, Matrix[] restBones, Vector3 centroid, Vector3 axisVec, Vector3 refPoint, bool preferSkinned, out Vector3 tipLocal, out int tipBone)
+        private static bool SelectTipVertex(ModelAsset model, Matrix[] restBones, Vector3 centroid, Vector3 axisVec, Vector3 refPoint, bool preferSkinned, out Vector3 tipLocal, out int tipBone)
         {
             bool hasMin = false, hasMax = false;
             Vector3 minLocal = Vector3.Zero, maxLocal = Vector3.Zero;
@@ -302,7 +443,7 @@ namespace Client.Main.Objects.Player
             return true;
         }
 
-        private static Matrix[] BuildRestPose(BMD model)
+        private static Matrix[] BuildRestPose(ModelAsset model)
         {
             if (model?.Bones == null || model.Bones.Length == 0)
                 return null;
@@ -315,7 +456,7 @@ namespace Client.Main.Objects.Player
                 var bone = bones[i];
                 Matrix local = Matrix.Identity;
 
-                if (bone != BMDTextureBone.Dummy &&
+                if (bone != ModelBone.Dummy &&
                     bone.Matrixes != null &&
                     bone.Matrixes.Length > 0 &&
                     bone.Matrixes[0].Quaternion?.Length > 0 &&
@@ -335,7 +476,7 @@ namespace Client.Main.Objects.Player
             return result;
         }
 
-        private static Vector3 TransformVertex(Matrix[] bones, Client.Data.BMD.BMDTextureVertex vert)
+        private static Vector3 TransformVertex(Matrix[] bones, Client.Data.Model.ModelVertex vert)
         {
             Vector3 local = ToXna(vert.Position);
             if (vert.Node >= 0 && bones != null && vert.Node < bones.Length)

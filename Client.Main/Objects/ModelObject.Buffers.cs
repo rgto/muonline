@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Data.Texture;
 using Client.Main.Content;
 using Client.Main.Controllers;
@@ -268,6 +268,27 @@ namespace Client.Main.Objects
                                 _logger?.LogDebug("SetDynamicBuffers: BoneTransform == null – skip");
                                 return;
                             }
+
+                            // Peça glb LINKADA (LinkParentAnimation) num pai BMD: o palette do
+                            // pai são mundos de osso puros (ibm=identidade no BMD). Vértices glb
+                            // são guardados no bind e precisam do PRÓPRIO InverseBind composto:
+                            // palette[b] = ibm_peça[b] × boneWorld_pai[b]. Os índices casam por
+                            // construção (peças são geradas no esqueleto do Player.bmd 1:1).
+                            // Gate: só glb + linkado — nenhum conteúdo antigo entra aqui.
+                            if (LinkParentAnimation && Model?.IsGltf == true &&
+                                Parent is ModelObject parentForIbm && parentForIbm.Model?.IsGltf != true)
+                            {
+                                int nb = Math.Min(bones.Length, Model.Bones.Length);
+                                var composed = new Matrix[bones.Length];
+                                Array.Copy(bones, composed, bones.Length);
+                                for (int bi = 0; bi < nb; bi++)
+                                {
+                                    var ib = Model.Bones[bi].InverseBind;
+                                    if (!ib.IsIdentity)
+                                        composed[bi] = ToXnaMatrix(ib) * bones[bi];
+                                }
+                                bones = composed;
+                            }
                         }
 
                         // Generate buffers only when necessary
@@ -346,7 +367,7 @@ namespace Client.Main.Objects
 
         private bool CanSkipCpuDynamicBufferBuildForInstancing(
             int meshIndex,
-            BMDTextureMesh mesh,
+            Client.Data.Model.ModelMesh mesh,
             bool textureReady,
             bool canUseStaticMapCpuSkip,
             bool canUseMonsterCrowdCpuSkip)
@@ -399,7 +420,7 @@ namespace Client.Main.Objects
             }
         }
 
-        private bool TryEnableGpuSkinnedMesh(int meshIndex, BMDTextureMesh mesh)
+        private bool TryEnableGpuSkinnedMesh(int meshIndex, Client.Data.Model.ModelMesh mesh)
         {
             if (_gpuSkinMeshEnabled == null ||
                 _gpuSkinVertexBuffers == null ||
@@ -471,7 +492,7 @@ namespace Client.Main.Objects
             return true;
         }
 
-        private bool EnsureMeshTextureLoaded(int meshIndex, BMDTextureMesh mesh, bool allowLazyLoad)
+        private bool EnsureMeshTextureLoaded(int meshIndex, Client.Data.Model.ModelMesh mesh, bool allowLazyLoad)
         {
             if (_boneTextures == null ||
                 _scriptTextures == null ||
@@ -541,7 +562,8 @@ namespace Client.Main.Objects
 
             if (_meshBlendByScript != null && (uint)meshIndex < (uint)_meshBlendByScript.Length)
             {
-                _meshBlendByScript[meshIndex] = script?.Bright ?? false;
+                _meshBlendByScript[meshIndex] = (script?.Bright ?? false)
+                    || IsGlowEffectTexture(texturePath);
             }
 
             return _boneTextures[meshIndex] != null;

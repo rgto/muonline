@@ -89,16 +89,11 @@ namespace Client.Main.Controls.UI
             }
             else
             {
-                sprite.Draw(_cornerTopLeftTexture, new Rectangle(rect.X, rect.Y, _cornerTopLeftTexture.Width, _cornerTopLeftTexture.Height), Color.White);
-                sprite.Draw(_cornerTopRightTexture, new Rectangle(rect.X + rect.Width - _cornerTopRightTexture.Width, rect.Y, _cornerTopRightTexture.Width, _cornerTopRightTexture.Height), Color.White);
-                sprite.Draw(_cornerBottomLeftTexture, new Rectangle(rect.X, rect.Y + rect.Height - _cornerBottomLeftTexture.Height, _cornerBottomLeftTexture.Width, _cornerBottomLeftTexture.Height), Color.White);
-                sprite.Draw(_cornerBottomRightTexture, new Rectangle(rect.X + rect.Width - _cornerBottomRightTexture.Width, rect.Y + rect.Height - _cornerBottomRightTexture.Height, _cornerBottomRightTexture.Width, _cornerBottomRightTexture.Height), Color.White);
+                // Espessuras base das peças do frame (16px cada no popupfield0x).
+                int cw = _cornerTopLeftTexture.Width, ch = _cornerTopLeftTexture.Height;
+                int F = FrameLayout.CornerW, Fh = FrameLayout.CornerH; // tamanho editável dos cantos
 
-                sprite.Draw(_topLineTexture, new Rectangle(rect.X + _cornerTopLeftTexture.Width, rect.Y, rect.Width - _cornerTopLeftTexture.Width - _cornerTopRightTexture.Width, _topLineTexture.Height), Color.White);
-                sprite.Draw(_bottomLineTexture, new Rectangle(rect.X + _cornerBottomLeftTexture.Width, rect.Y + rect.Height - _bottomLineTexture.Height, rect.Width - _cornerBottomLeftTexture.Width - _cornerBottomRightTexture.Width, _bottomLineTexture.Height), Color.White);
-                sprite.Draw(_leftLineTexture, new Rectangle(rect.X, rect.Y + _cornerTopLeftTexture.Height, _leftLineTexture.Width, rect.Height - _cornerTopLeftTexture.Height - _cornerBottomLeftTexture.Height), Color.White);
-                sprite.Draw(_rightLineTexture, new Rectangle(rect.X + rect.Width - _rightLineTexture.Width, rect.Y + _cornerTopRightTexture.Height, _rightLineTexture.Width, rect.Height - _cornerTopRightTexture.Height - _cornerBottomRightTexture.Height), Color.White);
-
+                // Fundo (recuado pela espessura da moldura).
                 sprite.Draw(_backgroundTexture,
                             new Rectangle(
                                 rect.X + _leftLineTexture.Width,
@@ -106,6 +101,30 @@ namespace Client.Main.Controls.UI
                                 rect.Width - _leftLineTexture.Width - _rightLineTexture.Width,
                                 rect.Height - _topLineTexture.Height - _bottomLineTexture.Height),
                             Color.White);
+
+                // Arestas — offset (DX/DY), espessura e COMPRIMENTO (…Len) editáveis.
+                sprite.Draw(_topLineTexture, new Rectangle(
+                    rect.X + cw + FrameLayout.TopDX, rect.Y + FrameLayout.TopDY,
+                    rect.Width - cw * 2 + FrameLayout.TopLen, FrameLayout.TopThick), Color.White);
+                sprite.Draw(_bottomLineTexture, new Rectangle(
+                    rect.X + cw + FrameLayout.BottomDX, rect.Bottom - FrameLayout.BottomThick + FrameLayout.BottomDY,
+                    rect.Width - cw * 2 + FrameLayout.BottomLen, FrameLayout.BottomThick), Color.White);
+                sprite.Draw(_leftLineTexture, new Rectangle(
+                    rect.X + FrameLayout.LeftDX, rect.Y + ch + FrameLayout.LeftDY,
+                    FrameLayout.LeftThick, rect.Height - ch * 2 + FrameLayout.LeftLen), Color.White);
+                sprite.Draw(_rightLineTexture, new Rectangle(
+                    rect.Right - FrameLayout.RightThick + FrameLayout.RightDX, rect.Y + ch + FrameLayout.RightDY,
+                    FrameLayout.RightThick, rect.Height - ch * 2 + FrameLayout.RightLen), Color.White);
+
+                // Cantos — cada um com offset (DX/DY) e tamanho (F×Fh) editáveis.
+                sprite.Draw(_cornerTopLeftTexture, new Rectangle(
+                    rect.X + FrameLayout.TLDX, rect.Y + FrameLayout.TLDY, F, Fh), Color.White);
+                sprite.Draw(_cornerTopRightTexture, new Rectangle(
+                    rect.Right - F + FrameLayout.TRDX, rect.Y + FrameLayout.TRDY, F, Fh), Color.White);
+                sprite.Draw(_cornerBottomLeftTexture, new Rectangle(
+                    rect.X + FrameLayout.BLDX, rect.Bottom - Fh + FrameLayout.BLDY, F, Fh), Color.White);
+                sprite.Draw(_cornerBottomRightTexture, new Rectangle(
+                    rect.Right - F + FrameLayout.BRDX, rect.Bottom - Fh + FrameLayout.BRDY, F, Fh), Color.White);
             }
 
             base.Draw(gameTime);

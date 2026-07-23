@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using MUnique.OpenMU.Network.Packets;
 using MUnique.OpenMU.Network.Packets.ServerToClient;
 using Client.Main.Core.Utilities;
@@ -20,6 +20,13 @@ namespace Client.Main.Networking.PacketHandling.Handlers
     /// </summary>
     public class MiscGamePacketHandler : IGamePacketHandler
     {
+        /// <summary>
+        /// Limite de personagens por conta, do ÚLTIMO CharacterList do servidor
+        /// (UnlockedCharacterSlots). 0 até o primeiro pacote chegar. Quem manda no limite é
+        /// o servidor (MaximumCharactersPerAccount) — o cliente só reflete.
+        /// </summary>
+        public static int MaxCharactersFromServer { get; private set; }
+
         // ──────────────────────────── Fields ────────────────────────────
         private readonly ILogger<MiscGamePacketHandler> _logger;
         private readonly NetworkManager _networkManager;
@@ -596,6 +603,7 @@ namespace Client.Main.Networking.PacketHandling.Handlers
         [PacketHandler(0xF3, 0x00)]  // CharacterList
         public Task HandleCharacterListAsync(Memory<byte> packet)
         {
+            System.Console.WriteLine($"[DCPROBE] HandleCharacterList ENTER len={packet.Length}");
             try
             {
                 var list = new List<(string Name, CharacterClassNumber Class, ushort Level, byte[] Appearance)>();
@@ -610,13 +618,26 @@ namespace Client.Main.Networking.PacketHandling.Handlers
                 switch (_targetVersion)
                 {
                     case TargetProtocolVersion.Season6:
-                        if (packet.Length < MinHeaderS6 + 1)
+                        // Header-aware: o CharacterList vem como C1 (cabeçalho 4 bytes: Type,
+                        // Len8, Code, SubCode) OU C2 (cabeçalho 5 bytes: Type, Len16, Code,
+                        // SubCode). O C1 tem tamanho de 1 byte e ESTOURA em 6+ personagens
+                        // (6*44+8 = 272 > 255), truncando o pacote no fio. O servidor agora
+                        // manda a lista grande como C2; aqui só derivamos os offsets a partir
+                        // do tipo real, então o parsing é DINÂMICO (4, 6, 10, 20... chars).
+                        byte headerType = packet.Length > 0 ? packet.Span[0] : (byte)0;
+                        int headerLen = (headerType == 0xC2 || headerType == 0xC4) ? 5 : 4;
+                        // unlockFlags @ +0, moveCnt @ +1, count @ +2, isVault @ +3, dados @ +4
+                        if (packet.Length < headerLen + 4)
                         {
-                            _logger.LogWarning("CharacterList (S6) packet too short for header.");
+                            _logger.LogWarning("CharacterList (S6) packet too short for header (type=0x{Type:X2}).", headerType);
                             return Task.CompletedTask;
                         }
-                        count = packet.Span[6];
-                        offset = 8;
+                        count = packet.Span[headerLen + 2];
+                        // UnlockedCharacterSlots: o LIMITE de personagens que o servidor libera
+                        // (MaximumCharactersPerAccount). É ele que manda — o cliente não deve ter
+                        // limite próprio hardcoded.
+                        MaxCharactersFromServer = packet.Span[headerLen];
+                        offset = headerLen + 4;
                         int remaining = Math.Max(0, packet.Length - offset);
                         if (count > 0)
                         {

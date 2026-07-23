@@ -19,21 +19,46 @@ namespace Client.Main.Core.Utilities
         /// <summary>Lookup cache: SkillId → skill definition.</summary>
         private static Dictionary<int, SkillBMD> _skillDefinitions = [];
 
+        /// <summary>Lookup cache: SkillId → textos de tooltip (skilltooltiptext.bmd).</summary>
+        private static Dictionary<int, SkillTooltip> _skillTooltips = [];
+
         public static async Task Initialize()
         {
             _skillDefinitions = await InitializeSkillData();
+            _skillTooltips = await InitializeTooltipData();
         }
 
         /// <summary>
-        /// Loads skill_eng.bmd from an embedded resource and builds the definition table.
+        /// Loads Data/Local/skill.bmd and builds the definition table.
         /// </summary>
         private static async Task<Dictionary<int, SkillBMD>> InitializeSkillData()
         {
             var skillPath = Path.Combine(Constants.DataPath, "Local", "skill.bmd");
             var reader = new SkillBMDReader();
             var skills = await reader.Load(skillPath);
-            _logger?.LogInformation($"Loaded {skills.Count} skills from skill_eng.bmd");
+            _logger?.LogInformation($"Loaded {skills.Count} skills from skill.bmd");
             return skills;
+        }
+
+        /// <summary>
+        /// Loads Data/Local/skilltooltiptext.bmd (descrições oficiais das skills).
+        /// Opcional: Data antigo pode não ter o arquivo — segue sem descrições.
+        /// </summary>
+        private static async Task<Dictionary<int, SkillTooltip>> InitializeTooltipData()
+        {
+            var tooltipPath = Path.Combine(Constants.DataPath, "Local", "skilltooltiptext.bmd");
+            try
+            {
+                var reader = new SkillTooltipReader();
+                var tooltips = await reader.Load(tooltipPath);
+                _logger?.LogInformation($"Loaded {tooltips.Count} skill tooltips from skilltooltiptext.bmd");
+                return tooltips;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning($"Skill tooltips unavailable ({ex.Message})");
+                return [];
+            }
         }
 
         #region Public API ------------------------------------------------------
@@ -48,10 +73,27 @@ namespace Client.Main.Core.Utilities
         }
 
         /// <summary>
-        /// Gets skill name by skill ID.
+        /// Gets skill name by skill ID. The local skill.bmd of this Data (KR client,
+        /// S20 record layout) misparses under the S6 reader — names come out as XOR-phase
+        /// garbage ("W3dW3d…"). The server speaks S6, so the English table generated from
+        /// OpenMU's SkillNumber enum is authoritative here; the bmd name is only a fallback
+        /// for ids outside the table.
         /// </summary>
-        public static string GetSkillName(int skillId) =>
-            GetSkillDefinition(skillId)?.Name ?? $"Unknown Skill {skillId}";
+        public static string GetSkillName(int skillId)
+        {
+            if (SkillNames.TryGet(skillId, out var name))
+                return name;
+            return GetSkillDefinition(skillId)?.Name ?? $"Skill {skillId}";
+        }
+
+        /// <summary>
+        /// Textos de tooltip da skill (skilltooltiptext.bmd) no idioma do Data instalado.
+        /// </summary>
+        public static SkillTooltip? GetSkillTooltip(int skillId)
+        {
+            _skillTooltips.TryGetValue(skillId, out var tooltip);
+            return tooltip;
+        }
 
         /// <summary>
         /// Gets skill type (AREA/TARGET/SELF) by skill ID.

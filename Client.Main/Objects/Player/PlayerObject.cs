@@ -14,7 +14,7 @@ using Client.Main.Networking.Services;
 using Client.Main.Networking;
 using System;
 using Client.Data.ATT;
-using Client.Data.BMD;
+using Client.Data.Model;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework.Graphics;
 using Client.Main.Controllers;
@@ -38,6 +38,21 @@ namespace Client.Main.Objects.Player
     public class PlayerObject : WalkerObject
     {
         protected override bool RequiresPerFrameAnimation => IsMainWalker;
+
+        // O Player carrega o Player.bmd ORIGINAL (380 ações), mas o enum PlayerAction do
+        // cliente é compacto (walk=15). Reconcilia via PlayerActionBmdMap para a animação
+        // amostrar a ação certa (senão o personagem desliza em pose parada).
+        protected override int ResolveActionIndex(int action)
+            => Client.Main.Models.PlayerActionBmdMap.ToBmd(action);
+
+        /// <summary>Walk (15–24) e Run (25–33) do enum compacto = locomoção a pé.</summary>
+        protected override bool IsLocomotionByCompactAction(int compactAction)
+        {
+            var a = (PlayerAction)compactAction;
+            return (a >= PlayerAction.PlayerWalkMale && a <= PlayerAction.PlayerWalkSwim)   // 15–24
+                || (a >= PlayerAction.PlayerRun && a <= PlayerAction.PlayerRunSwim);        // 25–33
+        }
+
         private CharacterClassNumber _characterClass;
         // Cached gender flag – avoids evaluating gender every frame
         private bool _isFemale;
@@ -57,6 +72,15 @@ namespace Client.Main.Objects.Player
         internal const int LeftHandBoneIndex = 33;
         internal const int RightHandBoneIndex = 42;
         private const int BackWeaponBoneIndex = 47; // Same anchor used by wings
+
+        // Ajuste do ESCUDO empunhado (ItemGroup 6). A orientação do osso da mão deixa a face
+        // virada errada; estes valores (graus / units de mundo) corrigem. Mexer aqui e testar.
+        private const float ShieldHeldRotX = 0f;
+        private const float ShieldHeldRotY = 0f;
+        private const float ShieldHeldRotZ = 0f;
+        private const float ShieldHeldPosX = 0f;
+        private const float ShieldHeldPosY = 0f;
+        private const float ShieldHeldPosZ = 0f;
         private const short WingOfStormIndex = 36;
         private const short WingOfRuinIndex = 39;
         private string _helmModelPath;
@@ -126,6 +150,11 @@ namespace Client.Main.Objects.Player
         private ushort _lastMagicSpeedStat = ushort.MaxValue;
 
         private readonly object _inventoryAppearanceUpdateSync = new();
+        // Serializa o carregamento de aparência (corpo + equipamento). Sem isto, duas
+        // atualizações concorrentes (ex.: cliques rápidos entre slots na seleção) se
+        // intercalam nos awaits de SetBodyPartsAsync e o personagem sai com peças faltando
+        // — e DIFERENTE a cada vez, pois depende do timing. Uma trava serializa tudo.
+        private readonly System.Threading.SemaphoreSlim _appearanceGate = new(1, 1);
         private bool _inventoryAppearanceUpdateRunning;
         private bool _inventoryAppearanceUpdatePending;
 
@@ -244,9 +273,18 @@ namespace Client.Main.Objects.Player
             }
             else
             {
-                // Remote players use AppearanceData
-                await UpdateBodyPartClassesAsync();
-                await UpdateEquipmentAppearanceAsync();
+                // Remote players / bustos da seleção usam AppearanceData. As DUAS chamadas
+                // (corpo da classe + equipamento por cima) precisam rodar ATÔMICAS: se um
+                // segundo Load() (clique rápido entre slots) intercalar entre elas, a
+                // armadura era limpa e recarregada no meio e sumia — voltava o bug do char
+                // "sem armadura", DIFERENTE a cada vez. A trava aqui garante a sequência.
+                await _appearanceGate.WaitAsync();
+                try
+                {
+                    await UpdateBodyPartClassesCoreAsync();
+                    await UpdateEquipmentAppearanceCoreAsync();
+                }
+                finally { _appearanceGate.Release(); }
             }
 
             await base.Load();
@@ -451,7 +489,7 @@ namespace Client.Main.Objects.Player
             return -1;
         }
 
-        protected override bool PostProcessBoneTransforms(BMDTextureBone[] bones, Matrix[] boneTransforms)
+        protected override bool PostProcessBoneTransforms(Client.Data.Model.ModelBone[] bones, Matrix[] boneTransforms)
         {
             if (!IsMainWalker)
                 return false;
@@ -469,7 +507,7 @@ namespace Client.Main.Objects.Player
             Matrix head = boneTransforms[headIndex];
             Vector3 headPos = head.Translation;
 
-            // BMD uses a different axis convention than the world (matches SourceMain5.2 head logic):
+            // ModelAsset uses a different axis convention than the world (matches SourceMain5.2 head logic):
             // Head yaw is applied to Euler component [0] and pitch to [2], so we rotate around the head bone's
             // local X axis (row 1) for yaw and local Z axis (row 3) for pitch.
             Vector3 axisYaw = new Vector3(head.M11, head.M12, head.M13);
@@ -630,7 +668,9 @@ namespace Client.Main.Objects.Player
             {
                 await LoadPartAsync(Helm, helmDef.TexturePath?.Replace("Item/", "Player/"));
                 SetItemProperties(Helm, inventory[InventoryConstants.HelmSlot]);
-                _helmItemEquipped = true;
+                // Só conta como elmo se o modelo do item resolveu (senão o slot fica com a
+                // cabeça default da classe e o HelmMask duplicaria a cabeça).
+                _helmItemEquipped = helmDef.TexturePath != null;
             }
             else
             {
@@ -736,6 +776,13 @@ namespace Client.Main.Objects.Player
 
         private async Task UpdateEquipmentAppearanceAsync()
         {
+            await _appearanceGate.WaitAsync();
+            try { await UpdateEquipmentAppearanceCoreAsync(); }
+            finally { _appearanceGate.Release(); }
+        }
+
+        private async Task UpdateEquipmentAppearanceCoreAsync()
+        {
             if (Appearance.RawData.IsEmpty) return; // No appearance data to process
 
             static bool HasEquippedAppearanceItem(short index)
@@ -754,7 +801,9 @@ namespace Client.Main.Objects.Player
                 Helm.ItemLevel = Appearance.HelmItemLevel;
                 Helm.IsExcellentItem = Appearance.HelmExcellent;
                 Helm.IsAncientItem = Appearance.HelmAncient;
-                _helmItemEquipped = true;
+                // Índice de elmo que não resolve (ex. classe evoluída) deixa a cabeça
+                // default no slot — não marcar como elmo, senão o HelmMask duplica a cabeça.
+                _helmItemEquipped = helmDef?.TexturePath != null;
             }
             else
             {
@@ -853,10 +902,14 @@ namespace Client.Main.Objects.Player
             // This requires more sophisticated logic to determine the exact weapon model
             // based on item group, index, and potentially other flags.
             // For now, we'll use generic models if an item is equipped.
-            short leftHandNumber = Appearance.LeftHandItemNumber;
+            // NOTA: mão TROCADA de propósito nesta tela. In-game (caminho por inventário) as
+            // mãos ficam certas, mas aqui (caminho por Appearance do pacote CharacterList) o
+            // left/right vinha invertido — a espada e o escudo apareciam na mão errada. Aqui
+            // Weapon1 (osso da mão ESQUERDA, bone 33) recebe o item de RightHand e vice-versa.
+            short leftHandNumber = Appearance.RightHandItemNumber;
             if (leftHandNumber >= 0 && leftHandNumber != 0xFF)
             {
-                var leftHandDef = ItemDatabase.GetItemDefinition(Appearance.LeftHandItemGroup, leftHandNumber);
+                var leftHandDef = ItemDatabase.GetItemDefinition(Appearance.RightHandItemGroup, leftHandNumber);
                 if (leftHandDef != null)
                 {
                     Weapon1.Model = await BMDLoader.Instance.Prepare(leftHandDef.TexturePath);
@@ -864,9 +917,9 @@ namespace Client.Main.Objects.Player
                     Weapon1.LinkParentAnimation = false;
 
                     // Apply item properties for shader effects
-                    Weapon1.ItemLevel = Appearance.LeftHandItemLevel;
-                    Weapon1.IsExcellentItem = Appearance.LeftHandExcellent;
-                    Weapon1.IsAncientItem = Appearance.LeftHandAncient;
+                    Weapon1.ItemLevel = Appearance.RightHandItemLevel;
+                    Weapon1.IsExcellentItem = Appearance.RightHandExcellent;
+                    Weapon1.IsAncientItem = Appearance.RightHandAncient;
                     RefreshWeaponAttachment(Weapon1, isLeftHand: true);
                 }
                 else
@@ -881,10 +934,10 @@ namespace Client.Main.Objects.Player
                 Weapon1.TexturePath = null;
             }
 
-            short rightHandNumber = Appearance.RightHandItemNumber;
+            short rightHandNumber = Appearance.LeftHandItemNumber;
             if (rightHandNumber >= 0 && rightHandNumber != 0xFF)
             {
-                var rightHandDef = ItemDatabase.GetItemDefinition(Appearance.RightHandItemGroup, rightHandNumber);
+                var rightHandDef = ItemDatabase.GetItemDefinition(Appearance.LeftHandItemGroup, rightHandNumber);
                 if (rightHandDef != null)
                 {
                     Weapon2.Model = await BMDLoader.Instance.Prepare(rightHandDef.TexturePath);
@@ -892,9 +945,9 @@ namespace Client.Main.Objects.Player
                     Weapon2.LinkParentAnimation = false;
 
                     // Apply item properties for shader effects
-                    Weapon2.ItemLevel = Appearance.RightHandItemLevel;
-                    Weapon2.IsExcellentItem = Appearance.RightHandExcellent;
-                    Weapon2.IsAncientItem = Appearance.RightHandAncient;
+                    Weapon2.ItemLevel = Appearance.LeftHandItemLevel;
+                    Weapon2.IsExcellentItem = Appearance.LeftHandExcellent;
+                    Weapon2.IsAncientItem = Appearance.LeftHandAncient;
                     RefreshWeaponAttachment(Weapon2, isLeftHand: false);
                 }
                 else
@@ -933,7 +986,7 @@ namespace Client.Main.Objects.Player
                 Helm.ItemLevel = appearanceConfig.HelmItemLevel;
                 Helm.IsExcellentItem = appearanceConfig.HelmExcellent;
                 Helm.IsAncientItem = appearanceConfig.HelmAncient;
-                _helmItemEquipped = true;
+                _helmItemEquipped = helmDef?.TexturePath != null;
             }
             else
             {
@@ -2602,6 +2655,21 @@ namespace Client.Main.Objects.Player
                 weapon.ParentBoneLink = isLeftHand ? LeftHandBoneIndex : RightHandBoneIndex;
                 weapon.Position = Vector3.Zero;
                 weapon.Angle = Vector3.Zero;
+
+                // Escudo EMPUNHADO: a orientação do osso da mão deixa a face virada pro
+                // lado errado. Ajuste fino de rotação/posição por estes valores (graus/units).
+                // (ItemGroup 6 = Shields.)
+                if (weapon.ItemGroup == 6)
+                {
+                    weapon.Angle = new Vector3(
+                        weapon.Angle.X + MathHelper.ToRadians(ShieldHeldRotX),
+                        weapon.Angle.Y + MathHelper.ToRadians(ShieldHeldRotY),
+                        weapon.Angle.Z + MathHelper.ToRadians(ShieldHeldRotZ));
+                    weapon.Position = new Vector3(
+                        weapon.Position.X + ShieldHeldPosX,
+                        weapon.Position.Y + ShieldHeldPosY,
+                        weapon.Position.Z + ShieldHeldPosZ);
+                }
             }
         }
 
@@ -3326,6 +3394,14 @@ namespace Client.Main.Objects.Player
 
         public async Task UpdateBodyPartClassesAsync()
         {
+            await _appearanceGate.WaitAsync();
+            try { await UpdateBodyPartClassesCoreAsync(); }
+            finally { _appearanceGate.Release(); }
+        }
+
+        /// <summary>Versão SEM trava — só chamar já segurando o _appearanceGate.</summary>
+        private async Task UpdateBodyPartClassesCoreAsync()
+        {
             // Clear shader properties from all body parts before loading defaults
             ClearItemProperties(Helm);
             ClearItemProperties(Armor);
@@ -3342,18 +3418,23 @@ namespace Client.Main.Objects.Player
         }
         public async Task UpdateBodyPartClassesAsync(PlayerClass playerClass)
         {
-            // Clear shader properties from all body parts before loading defaults
-            ClearItemProperties(Helm);
-            ClearItemProperties(Armor);
-            ClearItemProperties(Pants);
-            ClearItemProperties(Gloves);
-            ClearItemProperties(Boots);
-            HideHelmMask();
-            _helmItemEquipped = false;
+            await _appearanceGate.WaitAsync();
+            try
+            {
+                // Clear shader properties from all body parts before loading defaults
+                ClearItemProperties(Helm);
+                ClearItemProperties(Armor);
+                ClearItemProperties(Pants);
+                ClearItemProperties(Gloves);
+                ClearItemProperties(Boots);
+                HideHelmMask();
+                _helmItemEquipped = false;
 
-            await SetBodyPartsAsync("Player/",
-                "HelmClass", "ArmorClass", "PantClass", "GloveClass", "BootClass",
-                (int)playerClass);
+                await SetBodyPartsAsync("Player/",
+                    "HelmClass", "ArmorClass", "PantClass", "GloveClass", "BootClass",
+                    (int)playerClass);
+            }
+            finally { _appearanceGate.Release(); }
         }
 
         private async Task ResetBodyPartToClassDefaultAsync(ModelObject bodyPart, string partPrefix)
@@ -3375,6 +3456,16 @@ namespace Client.Main.Objects.Player
         {
             // Some helm models don't include the face mesh; keep the class head visible underneath.
             if (!_helmItemEquipped)
+            {
+                HideHelmMask();
+                return;
+            }
+
+            // Guard: se o slot Helm está com a CABEÇA DEFAULT da classe (item de elmo não
+            // resolveu — ex. aparência de classe evoluída com índice desconhecido), mostrar o
+            // HelmMask duplicaria a mesma cabeça (bug das "duas cabeças" na seleção).
+            string helmModelName = Helm?.Model?.Name;
+            if (helmModelName != null && helmModelName.Contains("HelmClass", StringComparison.OrdinalIgnoreCase))
             {
                 HideHelmMask();
                 return;

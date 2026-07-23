@@ -159,20 +159,36 @@ namespace Client.Main.Controls.Terrain
         {
             if (_data.HeightMap == null || _graphicsDevice == null) return;
 
-            _data.HeightMapTexture = new Texture2D(_graphicsDevice, Constants.TERRAIN_SIZE, Constants.TERRAIN_SIZE, false, SurfaceFormat.Single);
-
-            float[] heightData = ArrayPool<float>.Shared.Rent(Constants.TERRAIN_SIZE * Constants.TERRAIN_SIZE);
+            // SurfaceFormat.Single (R32F) NÃO é suportado pelo GLES do Android -> lançava
+            // NotSupportedException, que era engolida em GameControl.Load e deixava o
+            // TerrainControl com Status=Error => o terreno NUNCA desenhava (chão preto).
+            // Este HeightMapTexture não é consumido por nenhum shader/consumidor no projeto;
+            // então tornamos a criação tolerante a formato ausente (não fatal).
             try
             {
-                for (int i = 0; i < heightData.Length; i++)
+                _data.HeightMapTexture = new Texture2D(_graphicsDevice, Constants.TERRAIN_SIZE, Constants.TERRAIN_SIZE, false, SurfaceFormat.Single);
+
+                float[] heightData = ArrayPool<float>.Shared.Rent(Constants.TERRAIN_SIZE * Constants.TERRAIN_SIZE);
+                try
                 {
-                    heightData[i] = _data.HeightMap[i].R / 255.0f;
+                    for (int i = 0; i < heightData.Length; i++)
+                    {
+                        heightData[i] = _data.HeightMap[i].R / 255.0f;
+                    }
+                    _data.HeightMapTexture.SetData(heightData);
                 }
-                _data.HeightMapTexture.SetData(heightData);
+                finally
+                {
+                    ArrayPool<float>.Shared.Return(heightData);
+                }
             }
-            finally
+            catch (Exception ex)
             {
-                ArrayPool<float>.Shared.Return(heightData);
+                // Formato não suportado nesta GPU (ex.: GLES no Android): segue sem o
+                // heightmap-texture. O terreno é desenhado a partir do HeightMap[] em CPU,
+                // não depende desta textura.
+                _data.HeightMapTexture = null;
+                System.Console.WriteLine($"[TerrainRenderer] HeightMapTexture skipped (unsupported format): {ex.Message}");
             }
         }
 

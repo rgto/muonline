@@ -146,11 +146,15 @@ namespace Client.Main.Controls
                 _cursorNextMoveTime = 250f;
                 var newTile = new Vector2(MouseTileX, MouseTileY);
 
-                // Prevent duplicate move marker placement while the mouse is held on the same tile.
+                // Evita reprocessar enquanto o botão fica SEGURADO no mesmo tile, mas
+                // mantém o marcador aceso (antes o return apagava a marca).
                 int targetX = (int)newTile.X;
                 int targetY = (int)newTile.Y;
                 if (targetX == _lastMoveTargetX && targetY == _lastMoveTargetY)
+                {
+                    _cursor?.Show();
                     return;
+                }
 
                 if (!IsWalkable(newTile))
                     return;
@@ -163,6 +167,7 @@ namespace Client.Main.Controls
                 float worldY = newTile.Y * Constants.TERRAIN_SCALE;
                 float height = Terrain.RequestTerrainHeight(worldX, worldY) + ExtraHeight;
                 _cursor.Position = new Vector3(worldX, worldY, height) + new Vector3(50f, 40f, 0);
+                _cursor.Show();   // reacende mesmo se a posição não mudou
                 Walker.MoveTo(newTile);
                 _lastMoveTargetX = targetX;
                 _lastMoveTargetY = targetY;

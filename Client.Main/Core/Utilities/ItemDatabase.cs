@@ -75,6 +75,15 @@ namespace Client.Main.Core.Utilities
                         width = 2;
                     }
 
+                    // O SERVIDOR (OpenMU S6) é a autoridade das grades: quando as dims do
+                    // item.bmd (S21) divergem, o item desenhado invade os vizinhos. A tabela
+                    // ServerItemDims (dump do banco) vence SEMPRE que tiver o item.
+                    if (ServerItemDims.Table.TryGetValue(((byte)item.ItemSubGroup, (short)item.ItemSubIndex), out var srvDims))
+                    {
+                        width = srvDims.W;
+                        height = srvDims.H;
+                    }
+
                     var definition = new ItemDefinition(
                         id: item.ItemSubIndex,
                         name: itemName,

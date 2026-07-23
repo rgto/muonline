@@ -51,13 +51,22 @@ namespace Client.Main.Controls.UI
         public string Label { get; set; }
         public string Placeholder { get; set; }
 
+        /// <summary>
+        /// Filtro opcional aplicado a TODO texto que entra no campo — inclusive o que volta
+        /// do teclado do sistema no Android (que não passa pelo OnTextInput). Nulo = sem
+        /// filtro. O campo de NOME usa isto pra barrar espaço/quebra de linha.
+        /// </summary>
+        public Func<string, string> Sanitizer { get; set; }
+
         public string Value
         {
             get => _inputText.ToString();
             set
             {
+                var v = value ?? string.Empty;
+                if (Sanitizer != null) v = Sanitizer(v);
                 _inputText.Clear();
-                _inputText.Append(value ?? string.Empty);
+                _inputText.Append(v);
                 UpdateScrollOffset();
                 MoveCursorToEnd();
             }
@@ -350,9 +359,31 @@ namespace Client.Main.Controls.UI
 
         private void DrawFlatBackground(SpriteBatch spriteBatch)
         {
-            DrawBackground();
-            DrawBorder();
+            // Desenha fundo + borda DIRETO aqui (antes do texto). NÃO usa DrawBackground()/
+            // DrawBorder() do base, senão o base.Draw() (GameControl.Draw) os redesenharia
+            // POR CIMA do texto — era o bug do "texto por baixo". Por isso BackgroundColor/
+            // BorderColor ficam Transparent (base não redesenha nada).
+            var pixel = GraphicsManager.Instance.Pixel;
+            var r = DisplayRectangle;
+
+            if (FlatBackgroundColor.A > 0)
+                spriteBatch.Draw(pixel, r, FlatBackgroundColor * Alpha);
+
+            if (FlatBorderThickness > 0 && FlatBorderColor.A > 0)
+            {
+                var bc = FlatBorderColor * Alpha;
+                int t = FlatBorderThickness;
+                spriteBatch.Draw(pixel, new Rectangle(r.X, r.Y, r.Width, t), bc);
+                spriteBatch.Draw(pixel, new Rectangle(r.X, r.Bottom - t, r.Width, t), bc);
+                spriteBatch.Draw(pixel, new Rectangle(r.X, r.Y, t, r.Height), bc);
+                spriteBatch.Draw(pixel, new Rectangle(r.Right - t, r.Y, t, r.Height), bc);
+            }
         }
+
+        /// <summary>Fundo do skin Flat, desenhado ANTES do texto (não pelo base).</summary>
+        public Color FlatBackgroundColor { get; set; } = Color.Transparent;
+        public Color FlatBorderColor { get; set; } = Color.Transparent;
+        public int FlatBorderThickness { get; set; } = 0;
 
         private void DrawNineSliceBackground(SpriteBatch spriteBatch)
         {
@@ -388,19 +419,31 @@ namespace Client.Main.Controls.UI
 
             var gd = GraphicsManager.Instance.GraphicsDevice;
             var originalScissorRect = gd.ScissorRectangle;
-            var area = new Rectangle(
+            // O texto é desenhado com UiScaler.SpriteTransform (matriz de escala), mas o
+            // scissor test é em PIXELS DE TELA — então a área de recorte precisa ser
+            // convertida de coords virtuais pra reais (ToActual). Sem isso o recorte caía
+            // no Y errado e o texto aparecia acima/atrás do input.
+            var areaVirtual = new Rectangle(
                 DisplayRectangle.X + TextMargin,
                 DisplayRectangle.Y,
                 Math.Max(0, DisplayRectangle.Width - TextMargin * 2),
                 DisplayRectangle.Height
             );
+            var area = UiScaler.ToActual(areaVirtual);
             gd.ScissorRectangle = Rectangle.Intersect(originalScissorRect, area);
             gd.RasterizerState = new RasterizerState { ScissorTestEnable = true };
 
             float scale = FontSize / Constants.BASE_FONT_SIZE;
             string text = MaskValue ? new string('*', _inputText.Length) : _inputText.ToString();
+            // MeasureString(...).Y é a ALTURA DE LINHA cheia (inclui ascendente, descendente
+            // e line-gap), não a altura visível do glifo. Centralizar por ela deixa o texto
+            // "alto" na caixa. A tinta visível é ~72% da linha e começa ~14% abaixo do topo,
+            // então centramos pela altura VISÍVEL e compensamos o offset do topo.
+            float lineH = font.MeasureString("Ay").Y * scale;
+            float inkH = lineH * 0.72f;
+            float inkTopOffset = lineH * 0.14f;
             Vector2 textPos = new Vector2(DisplayRectangle.X + TextMargin - _scrollOffset,
-                                          DisplayRectangle.Y + (DisplayRectangle.Height - font.MeasureString("A").Y * scale) / 2f);
+                                          DisplayRectangle.Y + (DisplayRectangle.Height - inkH) / 2f - inkTopOffset);
 
             spriteBatch.DrawString(font, text, textPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
 
@@ -408,7 +451,7 @@ namespace Client.Main.Controls.UI
             {
                 float w = font.MeasureString(text).X * scale;
                 var cursorPos = textPos + new Vector2(w, 0);
-                if (cursorPos.X >= area.Left && cursorPos.X <= area.Right)
+                if (cursorPos.X >= areaVirtual.Left && cursorPos.X <= areaVirtual.Right)
                 {
                     spriteBatch.DrawString(font, "|", cursorPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
                 }

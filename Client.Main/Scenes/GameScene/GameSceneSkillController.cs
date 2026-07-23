@@ -81,6 +81,33 @@ namespace Client.Main.Scenes
             }
         }
 
+        /// <summary>
+        /// Dispara a skill informada num alvo (usado pelos botões de toque no mobile).
+        /// Reaproveita toda a lógica de mana/AG/cooldown/animação/pacote das rotas privadas.
+        /// </summary>
+        public void CastSkillOnTarget(Core.Client.SkillEntryState skill, MonsterObject target)
+        {
+            if (skill == null || target == null || target.IsDead)
+                return;
+
+            uint allowedRange = SkillDatabase.GetSkillRange(skill.SkillId);
+
+            if (IsAreaSkill(skill.SkillId))
+            {
+                if (IsInSkillRange(target.Location, allowedRange))
+                    UseAreaSkill(skill, target.NetworkId);
+                else
+                    QueueSkillCast(skill, target, allowedRange, isAreaSkill: true);
+            }
+            else
+            {
+                if (IsInSkillRange(target.Location, allowedRange))
+                    UseSkillOnTarget(skill, target);
+                else
+                    QueueSkillCast(skill, target, allowedRange, isAreaSkill: false);
+            }
+        }
+
         public void HandleRightClickSkillUsage()
         {
             var mouse = MuGame.Instance.Mouse;

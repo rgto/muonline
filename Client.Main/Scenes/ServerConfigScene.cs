@@ -217,7 +217,7 @@ namespace Client.Main.Scenes
 
         public ServerConfigDialog()
         {
-            ControlSize = new Point(400, 220);
+            ControlSize = new Point(420, 240);
             Align = ControlAlign.HorizontalCenter | ControlAlign.VerticalCenter;
 
             Controls.Add(new LabelControl
@@ -243,7 +243,7 @@ namespace Client.Main.Scenes
             {
                 Text = "Host",
                 X = 26,
-                Y = 72,
+                Y = 76,
                 AutoViewSize = false,
                 ViewSize = new Point(70, 20),
                 TextAlign = HorizontalAlign.Right,
@@ -251,12 +251,14 @@ namespace Client.Main.Scenes
                 TextColor = Color.LightGray
             });
 
+            // MESMO input da tela de login (skin Flat: fundo escuro sólido + borda
+            // dourada, texto com folga) via StyleInput.
             _hostInput = TextFieldControl.Create();
             _hostInput.X = 110;
-            _hostInput.Y = 68;
-            _hostInput.Skin = TextFieldSkin.NineSlice;
-            _hostInput.ControlSize = new Point(240, 30);
-            _hostInput.FontSize = 12f;
+            _hostInput.Y = 72;
+            _hostInput.AutoViewSize = false;
+            _hostInput.ViewSize = new Point(264, 32);
+            StyleInput(_hostInput);
             _hostInput.Interactive = true;
 
             Controls.Add(_hostInput);
@@ -265,7 +267,7 @@ namespace Client.Main.Scenes
             {
                 Text = "Port",
                 X = 26,
-                Y = 108,
+                Y = 118,
                 AutoViewSize = false,
                 ViewSize = new Point(70, 20),
                 TextAlign = HorizontalAlign.Right,
@@ -275,10 +277,10 @@ namespace Client.Main.Scenes
 
             _portInput = TextFieldControl.Create();
             _portInput.X = 110;
-            _portInput.Y = 104;
-            _portInput.Skin = TextFieldSkin.NineSlice;
-            _portInput.ControlSize = new Point(120, 30);
-            _portInput.FontSize = 12f;
+            _portInput.Y = 114;
+            _portInput.AutoViewSize = false;
+            _portInput.ViewSize = new Point(264, 32);
+            StyleInput(_portInput);
             _portInput.Interactive = true;
 
             Controls.Add(_portInput);
@@ -287,7 +289,7 @@ namespace Client.Main.Scenes
             {
                 Text = string.Empty,
                 X = 26,
-                Y = 140,
+                Y = 156,
                 AutoViewSize = false,
                 ViewSize = new Point(ControlSize.X - 60, 20),
                 FontSize = 11f,
@@ -299,7 +301,7 @@ namespace Client.Main.Scenes
             _okButton = new OkButton
             {
                 Align = ControlAlign.HorizontalCenter,
-                Y = 170
+                Y = 186
             };
             _okButton.Click += (_, _) => SubmitRequested?.Invoke(this, EventArgs.Empty);
             Controls.Add(_okButton);
@@ -309,6 +311,17 @@ namespace Client.Main.Scenes
 
             _hostInput.EnterKeyPressed += (_, _) => FocusPort();
             _portInput.EnterKeyPressed += (_, _) => SubmitRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>Mesmo estilo de input da tela de login (StyleInput do LoginDialog):
+        /// retângulo liso, fundo escuro sólido + borda dourada, fonte com folga.</summary>
+        private static void StyleInput(TextFieldControl input)
+        {
+            input.Skin = TextFieldSkin.Flat;
+            input.FlatBackgroundColor = new Color(12, 12, 16, 235);
+            input.FlatBorderColor = new Color(90, 78, 46, 255);
+            input.FlatBorderThickness = 1;
+            input.FontSize = 12f;
         }
 
         public void SetValues(string host, string port)

@@ -313,7 +313,8 @@ namespace Client.Main.Networking.PacketHandling.Handlers
                         {
                             reason = "Purchase failed. Please check Zen or space.";
                         }
-                        RequestDialog.ShowInfo(reason);
+                        // Popup padrão do cliente (mesmo do login/alertas).
+                        MessageWindow.Show(reason);
                     });
                     return Task.CompletedTask;
                 }

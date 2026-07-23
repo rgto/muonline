@@ -1,4 +1,4 @@
-﻿using Client.Data.BMD;
+﻿using Client.Data.Model;
 using Client.Main.Controllers;
 using Client.Main.Helpers;
 using Client.Main.Models;
@@ -65,6 +65,25 @@ namespace Client.Main.Objects
             Interactive = true;
             AnimationSpeed = 6f;
         }
+
+        // Walk (2) and Run (10) are the ground-locomotion cycles; speed-sync them to the
+        // monster's real travel speed so glTF strides don't slide (ResolveActionIndex is
+        // identity for monsters, so the resolved index equals MonsterActionType).
+        protected override bool IsLocomotionAction(int resolvedActionIndex)
+            => resolvedActionIndex == (int)MonsterActionType.Walk
+            || resolvedActionIndex == (int)MonsterActionType.Run;
+
+        protected override float LocomotionCadence(int resolvedActionIndex)
+            => resolvedActionIndex == (int)MonsterActionType.Run ? RunCadence : WalkCadence;
+
+        // Attack1/2 (3,4) and Attack3/4 (8,9) play the glTF clip at nativeRate × AttackCadence
+        // (mobile parity: state base speed 0.7 × attackSpeed stat 1.0) instead of stretching
+        // to the .bmd cycle — see ModelObject.AdvanceKeysPerSecond clock (2).
+        protected override bool IsAttackAction(int resolvedActionIndex)
+            => resolvedActionIndex == (int)MonsterActionType.Attack1
+            || resolvedActionIndex == (int)MonsterActionType.Attack2
+            || resolvedActionIndex == (int)MonsterActionType.Attack3
+            || resolvedActionIndex == (int)MonsterActionType.Attack4;
 
         public void StartDeathFade(float duration = 3.5f)
         {
@@ -326,24 +345,28 @@ namespace Client.Main.Objects
             }
         }
 
-        protected static BMDTextureAction[] BuildActionArray(
-            BMD srcModel,
+        protected static ModelAction[] BuildActionArray(
+            ModelAsset srcModel,
             int dstCount,
             IReadOnlyDictionary<int, int> map)
         {
-            var actions = new BMDTextureAction[dstCount];
+            var actions = new ModelAction[dstCount];
             foreach (var kv in map)
             {
                 int dst = kv.Key;
-                int src = kv.Value;
+                // O map guarda o valor do ENUM PlayerAction (compacto), não o índice real no
+                // Player.bmd. Traduzir pelo PlayerActionBmdMap (Season 21) — senão pega a ação
+                // errada (ex.: WalkSword=17 pegava a POSE PARADA no índice 17 em vez do walk),
+                // deixando o esqueleto com as pernas travadas e afundando no ataque.
+                int src = Client.Main.Models.PlayerActionBmdMap.ToBmd(kv.Value);
                 if (src >= 0 && src < srcModel.Actions.Length)
                 {
                     var srcAction = srcModel.Actions[src];
                     // Clone the action to avoid sharing PlaySpeed with player
                     // Player's dynamic attack speed modifiers should not affect monsters
                     // Use base PlaySpeed values from PlayerObject.InitializeActionSpeeds()
-                    float basePlaySpeed = GetPlayerActionBaseSpeed(src);
-                    actions[dst] = new BMDTextureAction
+                    float basePlaySpeed = GetPlayerActionBaseSpeed(kv.Value); // kv.Value = enum PlayerAction
+                    actions[dst] = new ModelAction
                     {
                         NumAnimationKeys = srcAction.NumAnimationKeys,
                         LockPositions = srcAction.LockPositions,
@@ -409,32 +432,34 @@ namespace Client.Main.Objects
             };
         }
 
-        protected static BMDTextureBone[] BuildBoneArray(
-            BMD srcModel,
+        protected static Client.Data.Model.ModelBone[] BuildBoneArray(
+            ModelAsset srcModel,
             int actionCount,
             IReadOnlyDictionary<int, int> map)
         {
-            var bones = new BMDTextureBone[srcModel.Bones.Length];
+            var bones = new Client.Data.Model.ModelBone[srcModel.Bones.Length];
 
             for (int i = 0; i < bones.Length; i++)
             {
                 var src = srcModel.Bones[i];
-                if (ReferenceEquals(src, BMDTextureBone.Dummy))
+                if (ReferenceEquals(src, Client.Data.Model.ModelBone.Dummy))
                 {
-                    bones[i] = BMDTextureBone.Dummy;
+                    bones[i] = Client.Data.Model.ModelBone.Dummy;
                     continue;
                 }
 
-                var matrices = new BMDBoneMatrix[actionCount];
+                var matrices = new ModelBoneTrack[actionCount];
                 foreach (var kv in map)
                 {
                     int dst = kv.Key;
-                    int srcIdx = kv.Value;
+                    // Mesmo motivo do BuildActionArray: traduzir enum PlayerAction -> índice
+                    // real do Player.bmd (Season 21) antes de indexar as matrizes do osso.
+                    int srcIdx = Client.Main.Models.PlayerActionBmdMap.ToBmd(kv.Value);
                     if (srcIdx >= 0 && srcIdx < src.Matrixes.Length)
                         matrices[dst] = src.Matrixes[srcIdx];
                 }
 
-                bones[i] = new BMDTextureBone
+                bones[i] = new Client.Data.Model.ModelBone
                 {
                     Name = src.Name,
                     Parent = src.Parent,

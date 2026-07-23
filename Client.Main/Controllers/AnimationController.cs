@@ -396,7 +396,7 @@ namespace Client.Main.Controllers
             _ => AnimationType.Idle
         };
 
-        private float CalcDuration(Client.Data.BMD.BMDTextureAction act)
+        private float CalcDuration(Client.Data.Model.ModelAction act)
         {
             if (act == null) return 1.0f; // Default duration for null actions
 

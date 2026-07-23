@@ -105,6 +105,21 @@ namespace Client.Main.Objects
         public Vector3 MoveTargetPosition { get; set; }
         public float MoveSpeed { get; set; } = Constants.MOVE_SPEED;
         public bool IsMoving => Vector3.Distance(MoveTargetPosition, TargetPosition) > 0f;
+
+        /// <summary>
+        /// Distância (unidades de mundo) do centro do tile em que o próximo tile do caminho já
+        /// é consumido, pra o movimento não parar entre tiles. ~35% de um tile: perto o
+        /// bastante pra a virada ser suave, longe o bastante pra não "cortar" a curva.
+        /// </summary>
+        private static readonly float ContinuePathThreshold = Constants.TERRAIN_SCALE * 0.35f;
+
+        /// <summary>
+        /// Horizontal (XY) ground distance this object actually moved on the last
+        /// UpdatePosition frame, in world units. Used to foot-plant-sync walk/run
+        /// animations (advance the cycle by distance covered, not wall-clock time), so
+        /// feet don't slide when the model's stride differs from MoveSpeed.
+        /// </summary>
+        public float LastGroundDistance { get; private set; }
         public new ushort NetworkId { get; set; }
 
         public ushort idanim = 0;
@@ -224,10 +239,21 @@ namespace Client.Main.Objects
 
             // Animation handled centrally to preserve cross-action blending
 
-            if (_currentPath != null && _currentPath.Count > 0 && !IsMoving)
+            // Encadeamento CONTÍNUO de tiles: consome o próximo tile do path ANTES de o char
+            // parar de vez no atual. Antes só pegava quando !IsMoving (parado 1 frame no centro
+            // de cada tile), o que dava o stop-and-go com cara de MU 30fps. Agora, quando falta
+            // pouco pra chegar (dentro de ContinuePathThreshold), já redireciona pro próximo —
+            // a velocidade não zera entre tiles e o movimento fica fluido. Location (tile lógico
+            // p/ o servidor) só troca quando MoveTowards roda, então o sync não muda.
+            if (_currentPath != null && _currentPath.Count > 0)
             {
-                var next = _currentPath.Dequeue();
-                MoveTowards(next, gameTime);
+                float remaining = Vector3.Distance(MoveTargetPosition, TargetPosition);
+                bool nearTile = remaining <= ContinuePathThreshold;
+                if (!IsMoving || nearTile)
+                {
+                    var next = _currentPath.Dequeue();
+                    MoveTowards(next, gameTime);
+                }
             }
 
             if (CurrentAction != _previousActionForSound)
@@ -475,6 +501,12 @@ namespace Client.Main.Objects
             float interpolationFactor = 15f * deltaTime;
             float newZ = MathHelper.Lerp(Position.Z, targetHeight, interpolationFactor);
 
+            // Ground distance actually covered this frame (XY only; Z is terrain-follow, not
+            // locomotion). Consumed by the animation loop to sync the walk cycle to travel.
+            float dx = MoveTargetPosition.X - Position.X;
+            float dy = MoveTargetPosition.Y - Position.Y;
+            LastGroundDistance = MathF.Sqrt(dx * dx + dy * dy);
+
             Position = new Vector3(MoveTargetPosition.X, MoveTargetPosition.Y, newZ);
         }
 
@@ -502,7 +534,22 @@ namespace Client.Main.Objects
             }
 
             float deltaTime = (float)time.ElapsedGameTime.TotalSeconds;
-            Vector3 moveVector = direction * MoveSpeed * deltaTime;
+
+            // Aceleração/desaceleração SUAVE: em vez de saltar de 0 -> velocidade máxima
+            // (start/stop duros = aspecto rígido), a velocidade atual persegue a alvo com uma
+            // rampa. Dá peso e fluidez ao andar/correr, como os clientes modernos. Quando há
+            // mais tiles na fila (movimento contínuo) o alvo é a MoveSpeed cheia; parando, ela
+            // decai suave até 0.
+            bool wantsToMove = HasQueuedPath || _movementIntent;
+            float targetSpeed = wantsToMove ? MoveSpeed : 0f;
+            // rampa exponencial (independente de FPS): ~120ms pra acelerar, ~90ms pra frear.
+            float accelRate = targetSpeed > _currentMoveSpeed ? 8.5f : 11f;
+            _currentMoveSpeed = MathHelper.Lerp(_currentMoveSpeed, targetSpeed,
+                                                1f - MathF.Exp(-accelRate * deltaTime));
+            // piso: perto do alvo, garante que chega (evita "arrastar" infinito no fim).
+            float effSpeed = MathF.Max(_currentMoveSpeed, MoveSpeed * 0.25f);
+
+            Vector3 moveVector = direction * effSpeed * deltaTime;
 
             if (moveVector.Length() >= (TargetPosition - MoveTargetPosition).Length())
             {
@@ -513,6 +560,8 @@ namespace Client.Main.Objects
             else
                 UpdateCameraPosition(MoveTargetPosition + moveVector);
         }
+
+        private float _currentMoveSpeed;
 
         private void UpdateCameraPosition(Vector3 position)
         {
@@ -714,6 +763,13 @@ namespace Client.Main.Objects
 
         protected bool _movementIntent;
         public bool MovementIntent => _movementIntent;
+
+        /// <summary>True se ainda há tiles na fila do caminho atual (usado pelo joystick pra
+        /// só reemitir um novo caminho quando o atual está acabando).</summary>
+        public bool HasQueuedPath => _currentPath != null && _currentPath.Count > 0;
+
+        /// <summary>Quantos tiles ainda restam na fila do caminho (0 se não há).</summary>
+        public int QueuedPathCount => _currentPath?.Count ?? 0;
 
         // protected override void Dispose(bool disposing)
         // {

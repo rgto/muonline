@@ -15,6 +15,8 @@ namespace Client.Main.Controllers
         private double _startTime = 0;
         private double _lastTime = 0;
         private int _frameCount = 0;
+        private int _hitchCount = 0;
+        private double _worstFrameMs = 0;
 
         public double WorldTime { get; private set; }
         public double FPS { get; private set; }
@@ -59,10 +61,25 @@ namespace Client.Main.Controllers
 
             FPS_ANIMATION_FACTOR = Math.Min((float)(REFERENCE_FPS / FPS), 2.5f);
 
+            // Diagnóstico de fluidez: conta frames "longos" (>22ms = abaixo de ~45fps) e loga
+            // FPS médio + nº de hitches a cada ~1s. Se houver muitos hitches, o "não fluido" é
+            // stutter de render, não o movimento. FPSPROBE em Constants.
+            if (Constants.FPSPROBE)
+            {
+                if (differenceMs > 22.0) _hitchCount++;
+                if (differenceMs > _worstFrameMs) _worstFrameMs = differenceMs;
+            }
+
             double diffSinceStart = WorldTime - _startTime;
             if (diffSinceStart > 2000.0 || _frameCount > 25)
             {
                 FPS_AVG = (1000.0 * _frameCount) / diffSinceStart;
+                if (Constants.FPSPROBE)
+                {
+                    System.Console.WriteLine($"[FPSPROBE] avg={FPS_AVG:F0}fps frames={_frameCount} hitches(>22ms)={_hitchCount} worst={_worstFrameMs:F0}ms");
+                    _hitchCount = 0;
+                    _worstFrameMs = 0;
+                }
                 _startTime = WorldTime;
                 _frameCount = 0;
             }

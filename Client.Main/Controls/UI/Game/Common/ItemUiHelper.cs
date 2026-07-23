@@ -162,7 +162,12 @@ namespace Client.Main.Controls.UI.Game.Common
                 float alpha = (float)(glowSize - i + 1) / glowSize * 0.6f;
                 Color layerColor = color * alpha;
 
-                var glowRect = new Rectangle(rect.X - i, rect.Y - i, rect.Width + i * 2, rect.Height + i * 2);
+                // Anéis PARA DENTRO do rect (i=1 na borda, esmaecendo pro centro):
+                // inflar para fora pintava até 4px por cima dos slots vizinhos.
+                int inset = i - 1;
+                var glowRect = new Rectangle(rect.X + inset, rect.Y + inset,
+                                             rect.Width - inset * 2, rect.Height - inset * 2);
+                if (glowRect.Width <= 0 || glowRect.Height <= 0) continue;
 
                 spriteBatch.Draw(pixel, new Rectangle(glowRect.X, glowRect.Y, glowRect.Width, 1), layerColor);
                 spriteBatch.Draw(pixel, new Rectangle(glowRect.X, glowRect.Bottom - 1, glowRect.Width, 1), layerColor);

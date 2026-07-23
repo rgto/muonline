@@ -32,22 +32,18 @@ namespace Client.Main.Controls.UI.Game
         // ═══════════════════════════════════════════════════════════════
         // WINDOW DIMENSIONS
         // ═══════════════════════════════════════════════════════════════
-        private const int SHOP_COLUMNS = 8;
-        private const int SHOP_ROWS = 15;
+        // 8 colunas = stride do protocolo (slot = y*8 + x); linhas/colunas ajustáveis pelo editor.
+        private static int SHOP_COLUMNS => Hud.NpcShopLayout.GridCols;
+        private static int SHOP_ROWS => Hud.NpcShopLayout.GridRows;
         private const int SHOP_SQUARE_WIDTH = 32;
         private const int SHOP_SQUARE_HEIGHT = 32;
 
-        private const int HEADER_HEIGHT = 46;
-        private const int SECTION_HEADER_HEIGHT = 22;
-        private const int GRID_PADDING = 10;
-        private const int BUTTON_AREA_HEIGHT = 40;
-        private const int FOOTER_HEIGHT = 46;
-        private const int WINDOW_MARGIN = 12;
-
-        private static readonly int GRID_WIDTH = SHOP_COLUMNS * SHOP_SQUARE_WIDTH;
-        private static readonly int GRID_HEIGHT = SHOP_ROWS * SHOP_SQUARE_HEIGHT;
-        private static readonly int WINDOW_WIDTH = GRID_WIDTH + GRID_PADDING * 2 + WINDOW_MARGIN * 2;
-        private int WindowHeight => HEADER_HEIGHT + SECTION_HEADER_HEIGHT + GRID_PADDING * 2 + GRID_HEIGHT + (_isRepairShop ? BUTTON_AREA_HEIGHT : 0) + FOOTER_HEIGHT + WINDOW_MARGIN;
+        private static int GRID_WIDTH => SHOP_COLUMNS * SHOP_SQUARE_WIDTH;
+        private static int GRID_HEIGHT => SHOP_ROWS * SHOP_SQUARE_HEIGHT;
+        // Dimensões dirigidas pelo NpcShopLayout (editor hud-edit-npcshop :5190).
+        private static int WINDOW_WIDTH => Hud.NpcShopLayout.PanelW;
+        private int WindowHeight => Hud.NpcShopLayout.PanelH;
+        private static int HEADER_HEIGHT => Hud.NpcShopLayout.DragBarH;
 
         // ═══════════════════════════════════════════════════════════════
         // MODERN DARK THEME
@@ -110,6 +106,12 @@ namespace Client.Main.Controls.UI.Game
 
         private RenderTarget2D _staticSurface;
         private bool _staticSurfaceDirty = true;
+
+        // Assets do visual novo (todos já existentes no jogo — sem patch).
+        private Texture2D _texPanel, _texTab, _texRect, _texDarkCard, _texGridRow;
+        private Texture2D _texClose, _texCloseHover, _texBtnDark, _texBtnGold, _texOkCancel, _texTooltip;
+        private Rectangle _pageTabRect, _bottomBtnRect;
+        private bool _bottomBtnHovered;
 
         private SpriteFont _font;
         private CharacterState _characterState;
@@ -179,43 +181,54 @@ namespace Client.Main.Controls.UI.Game
 
         private void BuildLayoutMetrics()
         {
-            int buttonAreaHeight = _isRepairShop ? BUTTON_AREA_HEIGHT : 0;
-
             _headerRect = new Rectangle(0, 0, WINDOW_WIDTH, HEADER_HEIGHT);
 
-            int gridFrameX = WINDOW_MARGIN;
-            int gridFrameY = HEADER_HEIGHT;
-            int gridFrameWidth = GRID_WIDTH + GRID_PADDING * 2;
-            int gridFrameHeight = SECTION_HEADER_HEIGHT + GRID_PADDING * 2 + GRID_HEIGHT;
-            _gridFrameRect = new Rectangle(gridFrameX, gridFrameY, gridFrameWidth, gridFrameHeight);
+            _gridFrameRect = new Rectangle((int)Hud.NpcShopLayout.CardX, (int)Hud.NpcShopLayout.CardY,
+                                           (int)Hud.NpcShopLayout.CardW, (int)Hud.NpcShopLayout.CardH);
+            _gridRect = new Rectangle((int)Hud.NpcShopLayout.GridX, (int)Hud.NpcShopLayout.GridY,
+                                      GRID_WIDTH, GRID_HEIGHT);
 
-            _gridRect = new Rectangle(
-                gridFrameX + GRID_PADDING,
-                gridFrameY + SECTION_HEADER_HEIGHT + GRID_PADDING,
-                GRID_WIDTH,
-                GRID_HEIGHT);
+            _closeButtonRect = new Rectangle((int)Hud.NpcShopLayout.CloseX, (int)Hud.NpcShopLayout.CloseY,
+                                             (int)Hud.NpcShopLayout.CloseW, (int)Hud.NpcShopLayout.CloseH);
+            _pageTabRect = new Rectangle((int)Hud.NpcShopLayout.PageTabX, (int)Hud.NpcShopLayout.PageTabY,
+                                         (int)Hud.NpcShopLayout.PageTabW, (int)Hud.NpcShopLayout.PageTabH);
+            _bottomBtnRect = new Rectangle((int)Hud.NpcShopLayout.BottomBtnX, (int)Hud.NpcShopLayout.BottomBtnY,
+                                           (int)Hud.NpcShopLayout.BottomBtnW, (int)Hud.NpcShopLayout.BottomBtnH);
 
-            _buttonAreaRect = new Rectangle(WINDOW_MARGIN, _gridFrameRect.Bottom + 2, _gridFrameRect.Width, buttonAreaHeight);
-            _footerRect = new Rectangle(WINDOW_MARGIN, _buttonAreaRect.Bottom + 4, _gridFrameRect.Width, FOOTER_HEIGHT - 8);
-            _closeButtonRect = new Rectangle(WINDOW_WIDTH - 30, 10, 20, 20);
+            // Linha do rodapé (só referência de texto).
+            _footerRect = new Rectangle(0, (int)(Hud.NpcShopLayout.FooterTextY - 12), WINDOW_WIDTH, 24);
+            _buttonAreaRect = Rectangle.Empty;
 
-            // Repair buttons in button area
-            int buttonWidth = 100;
-            int buttonHeight = 29;
-            int buttonSpacing = 10;
-            int buttonY = _buttonAreaRect.Y + (_buttonAreaRect.Height - buttonHeight) / 2;
-            int startX = _buttonAreaRect.X + 10;
-
-            _repairButtonRect = new Rectangle(startX, buttonY, buttonWidth, buttonHeight);
-            _repairAllButtonRect = new Rectangle(startX + buttonWidth + buttonSpacing, buttonY, buttonWidth, buttonHeight);
+            _repairButtonRect = new Rectangle((int)Hud.NpcShopLayout.RepairBtnX, (int)Hud.NpcShopLayout.RepairBtnY,
+                                              (int)Hud.NpcShopLayout.RepairBtnW, (int)Hud.NpcShopLayout.RepairBtnH);
+            _repairAllButtonRect = new Rectangle((int)(Hud.NpcShopLayout.RepairBtnX + Hud.NpcShopLayout.RepairBtnW + Hud.NpcShopLayout.RepairBtnGap),
+                                                 (int)Hud.NpcShopLayout.RepairBtnY,
+                                                 (int)Hud.NpcShopLayout.RepairBtnW, (int)Hud.NpcShopLayout.RepairBtnH);
         }
 
         public override async System.Threading.Tasks.Task Load()
         {
             await base.Load();
             _font = GraphicsManager.Instance.Font;
+
+            var tl = TextureLoader.Instance;
+            async System.Threading.Tasks.Task<Texture2D> L(string p) { try { return await tl.PrepareAndGetTexture(p); } catch { return null; } }
+            _texPanel = await L("Interface/Imprint/imprint_panel.OZP");
+            _texTab = await L("Interface/Imprint/imprint_tab.OZP");
+            _texRect = await L("Interface/Inventory/inv_rect.OZP");
+            _texDarkCard = await L("Interface/Imprint/imprint_dark_card.OZP");
+            _texGridRow = await L("Interface/Inventory/inv_grid_row.OZP");
+            _texClose = await L("Interface/Imprint/imprint_close.OZP");
+            _texCloseHover = await L("Interface/Imprint/imprint_close_hover.OZP");
+            _texBtnDark = await L("Interface/Inventory/inv_btn_dark.OZP");
+            _texBtnGold = await L("Interface/Inventory/inv_btn_gold.OZP");
+            _texOkCancel = await L("Interface/CharCreate/ok_cancel.OZT");   // botão padrão do cliente
+            _texTooltip = await L("Interface/Inventory/inv_tooltip.OZP");   // tooltip padrão (mesmo do inventário)
+
             InvalidateStaticSurface();
         }
+
+        private static bool Tex(Texture2D t) => t != null && !t.IsDisposed;
 
         public override void Update(GameTime gameTime)
         {
@@ -278,8 +291,9 @@ namespace Client.Main.Controls.UI.Game
                 UpdateChromeHover(mousePos);
 
                 // Handle close button
-                if (leftJustPressed && _closeHovered)
+                if (leftJustPressed && (_closeHovered || _bottomBtnHovered))
                 {
+                    SoundController.Instance.PlayBuffer("Sound/iButton.wav");
                     Visible = false;
                     HandleVisibilityLost();
                     return;
@@ -361,6 +375,7 @@ namespace Client.Main.Controls.UI.Game
         {
             var closeRect = Translate(_closeButtonRect);
             _closeHovered = closeRect.Contains(mousePos);
+            _bottomBtnHovered = Hud.NpcShopLayout.BottomBtnEnabled && Translate(_bottomBtnRect).Contains(mousePos);
 
             // Handle repair button hover (only show if repair shop)
             if (_isRepairShop)
@@ -400,11 +415,11 @@ namespace Client.Main.Controls.UI.Game
                     spriteBatch.Draw(_staticSurface, DisplayRectangle, Color.White * Alpha);
                 }
 
-                var pixel = GraphicsManager.Instance.Pixel;
-                ItemGridRenderHelper.DrawGridOverlays(spriteBatch, pixel, DisplayRectangle, _gridRect, _hoveredItem, _hoveredSlot,
-                                                      SHOP_SQUARE_WIDTH, SHOP_SQUARE_HEIGHT, Theme.SlotHover, Theme.Accent, Alpha);
+                // Sem highlight de célula/hover (mobile é touch; oficial não tem) — o
+                // quadrado claro ficava "vazando" sobre a grade no último toque.
                 DrawShopItems(spriteBatch);
                 DrawCloseButton(spriteBatch);
+                DrawBottomButtonHover(spriteBatch);
                 if (_isRepairShop)
                 {
                     DrawRepairButtons(spriteBatch);
@@ -514,15 +529,19 @@ namespace Client.Main.Controls.UI.Game
             var gd = GraphicsManager.Instance?.GraphicsDevice;
             if (gd == null) return;
 
+            // SUPERAMOSTRADA na resolução física (lição do inventário: texto nítido).
+            float k = MathF.Max(1f, UiScaler.Scale * Constants.RENDER_SCALE);
             _staticSurface?.Dispose();
-            _staticSurface = new RenderTarget2D(gd, WINDOW_WIDTH, WindowHeight, false, SurfaceFormat.Color, DepthFormat.None);
+            _staticSurface = new RenderTarget2D(gd, (int)MathF.Ceiling(WINDOW_WIDTH * k), (int)MathF.Ceiling(WindowHeight * k),
+                                                false, SurfaceFormat.Color, DepthFormat.None);
 
             var previousTargets = gd.GetRenderTargets();
             gd.SetRenderTarget(_staticSurface);
             gd.Clear(Color.Transparent);
 
             var spriteBatch = GraphicsManager.Instance.Sprite;
-            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend))
+            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend,
+                       GraphicsManager.GetQualityLinearSamplerState(), transform: Matrix.CreateScale(k, k, 1f)))
             {
                 DrawStaticElements(spriteBatch);
             }
@@ -539,11 +558,114 @@ namespace Client.Main.Controls.UI.Game
             if (pixel == null) return;
 
             var fullRect = new Rectangle(0, 0, WINDOW_WIDTH, WindowHeight);
-            DrawWindowBackground(spriteBatch, fullRect);
-            DrawModernHeader(spriteBatch);
-            DrawModernGridSection(spriteBatch);
-            DrawModernButtonArea(spriteBatch);
-            DrawModernFooter(spriteBatch);
+
+            // 1. Painel-template (barra de título assada). Fallback: fundo antigo.
+            if (Tex(_texPanel)) spriteBatch.Draw(_texPanel, fullRect, Color.White);
+            else DrawWindowBackground(spriteBatch, fullRect);
+
+            // 2. Título sobre a barra.
+            if (Hud.NpcShopLayout.TitleTextEnabled && _font != null)
+            {
+                string title = Hud.NpcShopLayout.TitleMessage;
+                float ts = Hud.NpcShopLayout.TitleTextFont / 25f;
+                Vector2 size = _font.MeasureString(title) * ts;
+                var pos = new Vector2(Hud.NpcShopLayout.TitleTextX - size.X / 2f, Hud.NpcShopLayout.TitleTextY - size.Y / 2f);
+                spriteBatch.DrawString(_font, title, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+                spriteBatch.DrawString(_font, title, pos, new Color(235, 210, 150), 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+            }
+
+            // 3. Aba de página "1".
+            if (Hud.NpcShopLayout.PageTabEnabled)
+            {
+                if (Tex(_texTab)) spriteBatch.Draw(_texTab, _pageTabRect, Color.White);
+                if (_font != null)
+                {
+                    float ps = Hud.NpcShopLayout.PageTabFont / 25f;
+                    Vector2 sz = _font.MeasureString("1") * ps;
+                    var pp = new Vector2(_pageTabRect.X + (_pageTabRect.Width - sz.X) / 2f,
+                                         _pageTabRect.Y + (_pageTabRect.Height - sz.Y) / 2f);
+                    spriteBatch.DrawString(_font, "1", pp + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, ps, SpriteEffects.None, 0f);
+                    spriteBatch.DrawString(_font, "1", pp, new Color(235, 210, 150), 0f, Vector2.Zero, ps, SpriteEffects.None, 0f);
+                }
+            }
+
+            // 4. Card (dark card + moldura) e a GRADE (células esverdeadas como no oficial).
+            if (Hud.NpcShopLayout.CardEnabled)
+            {
+                if (Tex(_texDarkCard)) spriteBatch.Draw(_texDarkCard, _gridFrameRect, Color.White);
+                if (Tex(_texRect)) Draw9Slice(spriteBatch, _texRect, _gridFrameRect);
+            }
+            if (Tex(_texGridRow))
+            {
+                // 1ª célula = borda esquerda, 8ª = direita; miolo cicla só entre as internas
+                // (usar c%8 fazia a 9ª coluna repetir a borda e abrir um GAP).
+                const int SRC_CELLS = 8;
+                int cellSrcW = _texGridRow.Width / SRC_CELLS;
+                for (int r = 0; r < SHOP_ROWS; r++)
+                {
+                    for (int c = 0; c < SHOP_COLUMNS; c++)
+                    {
+                        int srcIdx = c == 0 ? 0
+                                   : c == SHOP_COLUMNS - 1 ? SRC_CELLS - 1
+                                   : 1 + ((c - 1) % (SRC_CELLS - 2));
+                        var cell = new Rectangle(_gridRect.X + c * SHOP_SQUARE_WIDTH,
+                                                 _gridRect.Y + r * SHOP_SQUARE_HEIGHT,
+                                                 SHOP_SQUARE_WIDTH, SHOP_SQUARE_HEIGHT);
+                        var src = new Rectangle(cellSrcW * srcIdx, 0, cellSrcW, _texGridRow.Height);
+                        spriteBatch.Draw(_texGridRow, cell, src, Color.White);
+                    }
+                }
+            }
+
+            // 5. Rodapé (hint) — dourado, centrado.
+            if (Hud.NpcShopLayout.FooterTextEnabled && _font != null)
+            {
+                string hint = _isRepairShop
+                    ? (_shopMode == ShopMode.Repair ? "Repair mode - Click items" : "Buy/Sell - Press 'L' to repair")
+                    : "Click item to buy";
+                float fs = Hud.NpcShopLayout.FooterTextFont / 25f;
+                Vector2 size = _font.MeasureString(hint) * fs;
+                var pos = new Vector2((WINDOW_WIDTH - size.X) / 2f, Hud.NpcShopLayout.FooterTextY - size.Y / 2f);
+                spriteBatch.DrawString(_font, hint, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, fs, SpriteEffects.None, 0f);
+                spriteBatch.DrawString(_font, hint, pos, new Color(230, 200, 110), 0f, Vector2.Zero, fs, SpriteEffects.None, 0f);
+            }
+
+            // 6. Botão inferior ("Cancel Item Sale" — fecha a loja). Hover no dinâmico.
+            if (Hud.NpcShopLayout.BottomBtnEnabled)
+                DrawStandardButton(spriteBatch, _bottomBtnRect, Hud.NpcShopLayout.BottomBtnLabel, Hud.NpcShopLayout.BottomBtnFont);
+        }
+
+        // Botão padrão do cliente: metade "Save" (verde) da folha ok_cancel 467x80.
+        private void DrawStandardButton(SpriteBatch sb, Rectangle r, string label, float fontSize)
+        {
+            if (Tex(_texOkCancel)) sb.Draw(_texOkCancel, r, new Rectangle(0, 0, 233, 80), Color.White);
+            if (_font == null || string.IsNullOrEmpty(label)) return;
+            float s = fontSize / 25f;
+            Vector2 sz = _font.MeasureString(label) * s;
+            float maxW = r.Width - 14f;
+            if (sz.X > maxW && sz.X > 0f) { s *= maxW / sz.X; sz = _font.MeasureString(label) * s; }
+            // Mesmo acabamento do DrawOkButton do Skill Imprint (cor 230,225,215 + sombra 0.6).
+            var pos = new Vector2(r.X + (r.Width - sz.X) / 2f, r.Y + (r.Height - sz.Y) / 2f);
+            sb.DrawString(_font, label, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            sb.DrawString(_font, label, pos, new Color(230, 225, 215), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+        }
+
+        // 9-slice (borda m px) — moldura inv_rect (m=8) e tooltip (m=3).
+        private static void Draw9Slice(SpriteBatch sb, Texture2D tex, Rectangle dst, int m = 8)
+        {
+            int tw = tex.Width, th = tex.Height;
+            if (dst.Width < m * 2 + 2 || dst.Height < m * 2 + 2) { sb.Draw(tex, dst, Color.White); return; }
+            int cx = tw - 2 * m, cy = th - 2 * m;
+            int dcx = dst.Width - 2 * m, dcy = dst.Height - 2 * m;
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y, m, m), new Rectangle(0, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y, m, m), new Rectangle(tw - m, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Bottom - m, m, m), new Rectangle(0, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Bottom - m, m, m), new Rectangle(tw - m, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y, dcx, m), new Rectangle(m, 0, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Bottom - m, dcx, m), new Rectangle(m, th - m, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y + m, m, dcy), new Rectangle(0, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y + m, m, dcy), new Rectangle(tw - m, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y + m, dcx, dcy), new Rectangle(m, m, cx, cy), Color.White);
         }
 
         private void DrawModernHeader(SpriteBatch spriteBatch)
@@ -660,38 +782,27 @@ namespace Client.Main.Controls.UI.Game
             var pixel = GraphicsManager.Instance.Pixel;
             if (pixel == null || _font == null) return;
 
-            // Draw Repair button
-            var repairRect = Translate(_repairButtonRect);
-            Color repairBg = _shopMode == ShopMode.Repair ? Theme.AccentDim : Theme.BgLight;
-            Color repairBorder = _repairButtonHovered ? Theme.Accent : Theme.BorderInner;
-            UiDrawHelper.DrawPanel(spriteBatch, repairRect, repairBg, repairBorder, Theme.BorderOuter);
+            DrawRepairButton(spriteBatch, Translate(_repairButtonRect), "Repair item",
+                             _shopMode == ShopMode.Repair, _repairButtonHovered);
+            DrawRepairButton(spriteBatch, Translate(_repairAllButtonRect), "Repair all",
+                             false, _repairAllButtonHovered);
+        }
 
-            // Draw "Repair item" text for Repair
-            string repairText = "Repair item";
-            float scale = 0.4f;
-            Vector2 textSize = _font.MeasureString(repairText) * scale;
-            Vector2 textPos = new(repairRect.X + (repairRect.Width - textSize.X) / 2,
-                                  repairRect.Y + (repairRect.Height - textSize.Y) / 2);
-            spriteBatch.DrawString(_font, repairText, textPos + Vector2.One, Color.Black * 0.6f,
-                                   0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-            spriteBatch.DrawString(_font, repairText, textPos, Theme.TextWhite,
-                                   0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        private void DrawRepairButton(SpriteBatch spriteBatch, Rectangle rect, string label, bool active, bool hovered)
+        {
+            DrawStandardButton(spriteBatch, rect, label, Hud.NpcShopLayout.RepairBtnFont);
+            if (active && GraphicsManager.Instance.Pixel != null)
+                DrawBorderRect(spriteBatch, GraphicsManager.Instance.Pixel, rect, Theme.Accent);
+            if (hovered && GraphicsManager.Instance.Pixel != null)
+                spriteBatch.Draw(GraphicsManager.Instance.Pixel, rect, Color.White * 0.12f);
+        }
 
-            // Draw Repair All button
-            var repairAllRect = Translate(_repairAllButtonRect);
-            Color repairAllBorder = _repairAllButtonHovered ? Theme.Accent : Theme.BorderInner;
-            UiDrawHelper.DrawPanel(spriteBatch, repairAllRect, Theme.BgLight, repairAllBorder, Theme.BorderOuter);
-
-            // Draw "Repair all" text for Repair All
-            string allText = "Repair all";
-            scale = 0.4f;
-            textSize = _font.MeasureString(allText) * scale;
-            textPos = new(repairAllRect.X + (repairAllRect.Width - textSize.X) / 2,
-                          repairAllRect.Y + (repairAllRect.Height - textSize.Y) / 2);
-            spriteBatch.DrawString(_font, allText, textPos + Vector2.One, Color.Black * 0.6f,
-                                   0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-            spriteBatch.DrawString(_font, allText, textPos, Theme.TextWhite,
-                                   0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        private static void DrawBorderRect(SpriteBatch sb, Texture2D pixel, Rectangle r, Color c)
+        {
+            sb.Draw(pixel, new Rectangle(r.X, r.Y, r.Width, 1), c);
+            sb.Draw(pixel, new Rectangle(r.X, r.Bottom - 1, r.Width, 1), c);
+            sb.Draw(pixel, new Rectangle(r.X, r.Y, 1, r.Height), c);
+            sb.Draw(pixel, new Rectangle(r.Right - 1, r.Y, 1, r.Height), c);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -704,15 +815,19 @@ namespace Client.Main.Controls.UI.Game
             if (pixel == null) return;
 
             var rect = Translate(_closeButtonRect);
-            Color btnColor = _closeHovered ? Theme.Accent : Theme.TextGray;
+            var tex = _closeHovered && Tex(_texCloseHover) ? _texCloseHover : _texClose;
+            if (Tex(tex))
+            {
+                spriteBatch.Draw(tex, rect, Color.White * Alpha);
+                return;
+            }
 
-            // Draw X symbol
+            // Fallback: X procedural
+            Color btnColor = _closeHovered ? Theme.Accent : Theme.TextGray;
             int cx = rect.X + rect.Width / 2;
             int cy = rect.Y + rect.Height / 2;
             int halfSize = 6;
             int thickness = 2;
-
-            // Draw diagonal lines for X
             for (int i = -halfSize; i <= halfSize; i++)
             {
                 spriteBatch.Draw(pixel, new Rectangle(cx + i - thickness / 2, cy + i - thickness / 2, thickness, thickness), btnColor);
@@ -720,52 +835,49 @@ namespace Client.Main.Controls.UI.Game
             }
         }
 
+        // Realce de hover do botão inferior (a placa+label estão assadas na superfície estática).
+        private void DrawBottomButtonHover(SpriteBatch spriteBatch)
+        {
+            if (!Hud.NpcShopLayout.BottomBtnEnabled || !_bottomBtnHovered) return;
+            var pixel = GraphicsManager.Instance.Pixel;
+            if (pixel == null) return;
+            spriteBatch.Draw(pixel, Translate(_bottomBtnRect), Color.White * 0.15f);
+        }
+
         private void DrawShopItems(SpriteBatch spriteBatch)
         {
             var font = _font ?? GraphicsManager.Instance.Font;
-            Point gridOrigin = new(DisplayRectangle.X + _gridRect.X, DisplayRectangle.Y + _gridRect.Y);
             var pixel = GraphicsManager.Instance.Pixel;
             var jewelEntries = new List<(InventoryItem Item, Rectangle Rect)>();
 
             foreach (var item in _items)
             {
-                var rect = new Rectangle(
-                    gridOrigin.X + item.GridPosition.X * SHOP_SQUARE_WIDTH,
-                    gridOrigin.Y + item.GridPosition.Y * SHOP_SQUARE_HEIGHT,
-                    item.Definition.Width * SHOP_SQUARE_WIDTH,
-                    item.Definition.Height * SHOP_SQUARE_HEIGHT);
+                var rect = ItemFootprint(item);
 
                 bool isHovered = item == _hoveredItem;
-                Texture2D texture = ResolveItemTexture(item, rect.Width, rect.Height, isHovered);
 
-                // Glow similar to inventory/vault
-                Color glowColor = ItemUiHelper.GetItemGlowColor(item, GlowPalette);
-                if (glowColor.A > 0 || isHovered)
-                {
-                    Color finalGlow = isHovered ? Color.Lerp(glowColor, Theme.Accent, 0.4f) : glowColor;
-                    finalGlow.A = (byte)Math.Min(255, finalGlow.A + (isHovered ? 40 : 0));
-                    ItemUiHelper.DrawItemGlow(spriteBatch, pixel, rect, finalGlow);
-                }
-
-                // Cell background
-                if (pixel != null)
-                {
-                    var bgRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
-                    spriteBatch.Draw(pixel, bgRect, isHovered ? Theme.SlotHover : Theme.SlotBg);
-                }
+                // Estilo oficial (RealMU): item DIRETO na grade — sem box, sem glow, sem
+                // borda, sem hover. Sprite com INSET de 2px pra nunca cobrir as linhas
+                // da grade (senão itens vizinhos parecem "vazar" um no outro).
+                var texRect = new Rectangle(rect.X + 2, rect.Y + 2, rect.Width - 4, rect.Height - 4);
+                Texture2D texture = ResolveItemTexture(item, texRect.Width, texRect.Height, isHovered);
 
                 if (texture != null)
                 {
-                    spriteBatch.Draw(texture, rect, Color.White * Alpha);
+                    // Fit com proporção dentro do slot: sprites não-BMD eram esticados
+                    // anisotropicamente no texRect (pra BMD o fit é identidade, o preview
+                    // já é gerado no tamanho do texRect).
+                    Rectangle iconRect = ItemGridRenderHelper.FitRect(rect, texture.Width, texture.Height, 2);
+                    spriteBatch.Draw(texture, iconRect, Color.White * Alpha);
 
                     if (JewelShineOverlay.ShouldShine(item))
                     {
-                        jewelEntries.Add((item, rect));
+                        jewelEntries.Add((item, iconRect));
                     }
                 }
                 else if (pixel != null)
                 {
-                    ItemGridRenderHelper.DrawItemPlaceholder(spriteBatch, pixel, font, rect, item, Theme.BgLight, Theme.TextGray * 0.8f);
+                    ItemGridRenderHelper.DrawItemPlaceholder(spriteBatch, pixel, font, texRect, item, Theme.BgLight, Theme.TextGray * 0.8f);
                 }
 
                 if (font != null && item.Definition.BaseDurability == 0 && item.Definition.MagicDurability == 0 && item.Durability > 1)
@@ -816,11 +928,7 @@ namespace Client.Main.Controls.UI.Game
             int tooltipHeight = totalHeight + paddingY * 2;
 
             Point mouse = MuGame.Instance.UiMouseState.Position;
-            var itemRect = new Rectangle(
-                DisplayRectangle.X + _gridRect.X + _hoveredItem.GridPosition.X * SHOP_SQUARE_WIDTH,
-                DisplayRectangle.Y + _gridRect.Y + _hoveredItem.GridPosition.Y * SHOP_SQUARE_HEIGHT,
-                _hoveredItem.Definition.Width * SHOP_SQUARE_WIDTH,
-                _hoveredItem.Definition.Height * SHOP_SQUARE_HEIGHT);
+            var itemRect = ItemFootprint(_hoveredItem);
 
             Rectangle tooltipRect = new(mouse.X + 16, mouse.Y + 16, tooltipWidth, tooltipHeight);
             Rectangle screenBounds = new(0, 0, UiScaler.VirtualSize.X, UiScaler.VirtualSize.Y);
@@ -849,11 +957,6 @@ namespace Client.Main.Controls.UI.Game
             var pixel = GraphicsManager.Instance.Pixel;
             if (pixel == null) return;
 
-            var shadowRect = new Rectangle(tooltipRect.X + 4, tooltipRect.Y + 4, tooltipRect.Width, tooltipRect.Height);
-            spriteBatch.Draw(pixel, shadowRect, Color.Black * 0.5f);
-
-            UiDrawHelper.DrawVerticalGradient(spriteBatch, tooltipRect, new Color(20, 24, 32, 252), new Color(12, 14, 18, 254));
-
             bool isExcellent = _hoveredItem.Details.IsExcellent;
             bool isAncient = _hoveredItem.Details.IsAncient;
             bool isHighLevel = _hoveredItem.Details.Level >= 7;
@@ -863,11 +966,20 @@ namespace Client.Main.Controls.UI.Game
                                 isHighLevel ? Theme.Accent :
                                 Theme.TextWhite;
 
-            const int borderThickness = 2;
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, tooltipRect.Width, borderThickness), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Bottom - borderThickness, tooltipRect.Width, borderThickness), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.Right - borderThickness, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+            // Fundo padrão do cliente (inv_tooltip 9-slice, sem sombra) — igual ao inventário.
+            if (Tex(_texTooltip))
+            {
+                Draw9Slice(spriteBatch, _texTooltip, tooltipRect, 3);
+            }
+            else
+            {
+                UiDrawHelper.DrawVerticalGradient(spriteBatch, tooltipRect, new Color(20, 24, 32, 252), new Color(12, 14, 18, 254));
+                const int borderThickness = 2;
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, tooltipRect.Width, borderThickness), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Bottom - borderThickness, tooltipRect.Width, borderThickness), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.Right - borderThickness, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+            }
 
             int textY = tooltipRect.Y + paddingY;
             bool firstLine = true;
@@ -950,20 +1062,50 @@ namespace Client.Main.Controls.UI.Game
         {
             if (!DisplayRectangle.Contains(mousePos)) return null;
 
-            Point gridOrigin = new(DisplayRectangle.X + _gridRect.X, DisplayRectangle.Y + _gridRect.Y);
-
             foreach (var item in _items)
             {
-                var rect = new Rectangle(
-                    gridOrigin.X + item.GridPosition.X * SHOP_SQUARE_WIDTH,
-                    gridOrigin.Y + item.GridPosition.Y * SHOP_SQUARE_HEIGHT,
-                    item.Definition.Width * SHOP_SQUARE_WIDTH,
-                    item.Definition.Height * SHOP_SQUARE_HEIGHT);
-
-                if (rect.Contains(mousePos)) return item;
+                if (ItemFootprint(item).Contains(mousePos)) return item;
             }
 
             return null;
+        }
+
+        // Dimensões EFETIVAS do item na grade: as dims do item.bmd (S21) podem divergir das
+        // do servidor (S6) que POSICIONOU os itens — sem clamp, o retângulo invade o vizinho
+        // e a moldura ("itens vazando"). Limita pela próxima célula ocupada e pelas bordas.
+        private (int W, int H) EffectiveDims(InventoryItem item)
+        {
+            int x = item.GridPosition.X, y = item.GridPosition.Y;
+            int defW = Math.Max(1, item.Definition?.Width ?? 1);
+            int defH = Math.Max(1, item.Definition?.Height ?? 1);
+            int w = Math.Min(defW, SHOP_COLUMNS - x);
+            int h = Math.Min(defH, SHOP_ROWS - y);
+
+            foreach (var other in _items)
+            {
+                if (ReferenceEquals(other, item)) continue;
+                int ox = other.GridPosition.X, oy = other.GridPosition.Y;
+                // Vizinhos na MESMA faixa de linhas limitam a largura pelos DOIS lados:
+                // se a fileira está empacotada de 1 em 1, até o último item (sem vizinho à
+                // direita) rende 1 de largura — senão ele "vaza" pro espaço vazio ao lado.
+                if (oy >= y && oy < y + defH && ox != x)
+                    w = Math.Min(w, Math.Abs(ox - x));
+                if (ox >= x && ox < x + defW && oy != y)
+                    h = Math.Min(h, Math.Abs(oy - y));
+            }
+
+            return (Math.Max(1, w), Math.Max(1, h));
+        }
+
+        // Retângulo (em coords de tela) que o item realmente ocupa na grade.
+        private Rectangle ItemFootprint(InventoryItem item)
+        {
+            var (w, h) = EffectiveDims(item);
+            return new Rectangle(
+                DisplayRectangle.X + _gridRect.X + item.GridPosition.X * SHOP_SQUARE_WIDTH,
+                DisplayRectangle.Y + _gridRect.Y + item.GridPosition.Y * SHOP_SQUARE_HEIGHT,
+                w * SHOP_SQUARE_WIDTH,
+                h * SHOP_SQUARE_HEIGHT);
         }
 
         private void HandleVisibilityLost()
@@ -1084,9 +1226,10 @@ namespace Client.Main.Controls.UI.Game
 
             foreach (var item in _items)
             {
-                int w = item.Definition.Width * SHOP_SQUARE_WIDTH;
-                int h = item.Definition.Height * SHOP_SQUARE_HEIGHT;
-                _ = ResolveItemTexture(item, w, h, animated: false);
+                // MESMO tamanho que o Draw pede (footprint efetivo - inset de 2px),
+                // senão o warmup povoa uma chave de cache que nunca é usada.
+                var rect = ItemFootprint(item);
+                _ = ResolveItemTexture(item, rect.Width - 4, rect.Height - 4, animated: false);
             }
         }
 

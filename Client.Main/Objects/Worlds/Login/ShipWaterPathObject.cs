@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Threading.Tasks;
-using Client.Data.BMD;
+using Client.Data.Model;
 
 namespace Client.Main.Objects.Worlds.Login
 {
@@ -11,7 +11,7 @@ namespace Client.Main.Objects.Worlds.Login
     {
         private const float TEXTURE_SCROLL_SPEED = 0.1f; // Texture scroll speed for ship water effect
         private double _accumulatedTime = 0.0;
-        private BMDTexCoord[][] _originalTexCoords;
+        private ModelTexCoordShim[][] _originalTexCoords;
         protected override bool UsesMutableMeshData => true;
 
         public override async Task Load()
@@ -33,14 +33,14 @@ namespace Client.Main.Objects.Worlds.Login
             // Store original texture coordinates for each mesh
             if (Model?.Meshes != null && Model.Meshes.Length > 0)
             {
-                _originalTexCoords = new BMDTexCoord[Model.Meshes.Length][];
+                _originalTexCoords = new ModelTexCoordShim[Model.Meshes.Length][];
 
                 for (int meshIndex = 0; meshIndex < Model.Meshes.Length; meshIndex++)
                 {
                     var mesh = Model.Meshes[meshIndex];
                     if (mesh.TexCoords != null && mesh.TexCoords.Length > 0)
                     {
-                        _originalTexCoords[meshIndex] = new BMDTexCoord[mesh.TexCoords.Length];
+                        _originalTexCoords[meshIndex] = new ModelTexCoordShim[mesh.TexCoords.Length];
                         Array.Copy(mesh.TexCoords, _originalTexCoords[meshIndex], mesh.TexCoords.Length);
                     }
                 }

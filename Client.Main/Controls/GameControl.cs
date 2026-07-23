@@ -137,7 +137,7 @@ namespace Client.Main.Controls
             }
             catch (Exception e)
             {
-                _logger?.LogDebug(e, "Exception in GameControl");
+                _logger?.LogWarning(e, "Exception in GameControl.Initialize ({Type})", GetType().Name);
                 Status = GameControlStatus.Error;
             }
         }

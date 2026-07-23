@@ -22,6 +22,12 @@ namespace Client.Main.Content
         private readonly ConcurrentDictionary<string, Lazy<Task<TextureData>>> _textureTasks = new();
         private readonly ConcurrentDictionary<string, ClientTexture> _textures = new();
 
+        // glTF/.glb assets carry their textures embedded (PNG/JPG bytes) instead of as
+        // loose files on disk. We stash those raw bytes here keyed by the mesh's
+        // TexturePath, and decode them lazily to a Texture2D (via FromStream, main
+        // thread) on first GetTexture2D — same access pattern as disk textures.
+        private readonly ConcurrentDictionary<string, byte[]> _embeddedTextureBytes = new();
+
         // Cache: Key -> Resolved Full Path (or empty if not found)
         private readonly ConcurrentDictionary<string, string> _pathResolutionCache = new();
 
@@ -78,6 +84,19 @@ namespace Client.Main.Content
         {
             await Prepare(path);
             return GetTexture2D(path);
+        }
+
+        /// <summary>
+        /// Register a texture whose bytes come EMBEDDED in a glTF/.glb (PNG or JPG),
+        /// keyed by the mesh TexturePath. No disk access — the bytes are decoded to a
+        /// Texture2D lazily on first <see cref="GetTexture2D"/>. Safe to call repeatedly
+        /// with the same key (first registration wins).
+        /// </summary>
+        public void RegisterEmbeddedTexture(string key, byte[] pngOrJpgBytes)
+        {
+            if (string.IsNullOrWhiteSpace(key) || pngOrJpgBytes == null || pngOrJpgBytes.Length == 0)
+                return;
+            _embeddedTextureBytes.TryAdd(NormalizePathKey(key), pngOrJpgBytes);
         }
 
         private async Task<TextureData> InternalPrepare(string path)
@@ -281,6 +300,31 @@ namespace Client.Main.Content
                 return null;
 
             string normalizedKey = NormalizePathKey(path);
+
+            // glTF embedded texture: decode the PNG/JPG bytes to a Texture2D on demand.
+            if (_embeddedTextureBytes.TryGetValue(normalizedKey, out var embeddedBytes))
+            {
+                if (_textures.TryGetValue(normalizedKey, out var cachedEmbedded)
+                    && cachedEmbedded.Texture != null && !cachedEmbedded.Texture.IsDisposed)
+                {
+                    Touch(cachedEmbedded);
+                    return cachedEmbedded.Texture;
+                }
+                if (_graphicsDevice == null) return null;
+                try
+                {
+                    using var ms = new MemoryStream(embeddedBytes);
+                    var decoded = Texture2D.FromStream(_graphicsDevice, ms);
+                    var ct = new ClientTexture { Texture = decoded, LastAccessUtc = DateTime.UtcNow };
+                    _textures[normalizedKey] = ct;
+                    return decoded;
+                }
+                catch (Exception ex)
+                {
+                    if (_logger != null && _logger.IsEnabled(LogLevel.Debug)) _logFailedAsset(_logger, path ?? string.Empty, ex);
+                    return null;
+                }
+            }
 
             if (!_textures.TryGetValue(normalizedKey, out ClientTexture clientTexture))
                 return null;

@@ -45,21 +45,19 @@ namespace Client.Main.Controls.UI.Game.Inventory
         };
 
         // ═══════════════════════════════════════════════════════════════
-        // WINDOW DIMENSIONS - REDESIGNED
+        // WINDOW DIMENSIONS — dirigidas pelo InventoryLayout (hud-edit-inventory)
         // ═══════════════════════════════════════════════════════════════
-        private const int WINDOW_WIDTH = 396;
-        private const int WINDOW_HEIGHT = 700;
+        private static int WINDOW_WIDTH => Hud.InventoryLayout.PanelW;
+        private static int WINDOW_HEIGHT => Hud.InventoryLayout.PanelH;
 
-        private const int HEADER_HEIGHT = 52;
-        private const int SECTION_SPACING = 16;
-        private const int PANEL_PADDING = 12;
-        private const int EQUIP_SECTION_HEIGHT = 270;
+        private static int HEADER_HEIGHT => Hud.InventoryLayout.DragBarH;
 
         public const int INVENTORY_SQUARE_WIDTH = 34;
         public const int INVENTORY_SQUARE_HEIGHT = 34;
 
-        public const int Columns = 8;
-        public const int Rows = 8;
+        // Configuráveis pelo editor (InventoryLayout). Ver aviso lá sobre Cols != 8.
+        public static int Columns => Hud.InventoryLayout.GridCols;
+        public static int Rows => Hud.InventoryLayout.GridRows;
         internal const int InventorySlotOffsetConstant = 12;
 
         // ═══════════════════════════════════════════════════════════════
@@ -227,6 +225,26 @@ namespace Client.Main.Controls.UI.Game.Inventory
         private Rectangle _footerLeftButtonRect;
         private Rectangle _footerRightButtonRect;
 
+        // ── Visual novo (MU oficial mobile — assets Interface/Inventory) ──
+        private const int SideButtonCount = 6;
+        private static readonly string[] SideButtonLabels =
+            { "Repair", "Disassemble", "Bundle", "Divide", "Personal S", "Expanded" };
+        private Rectangle _titleBarRect, _circleRect, _artifactBtnRect, _starBoxRect;
+        private Rectangle _earringLRect, _earringRRect;   // brincos: decorativos (server 0..11)
+        private Rectangle _expPanelRect, _expRectRect, _expCloseRect;   // janela "Expanded"
+        private bool _expandedOpen, _expCloseHovered;
+        private Rectangle _bundFieldRect, _bundIconRect;
+        private readonly Rectangle[] _sideButtonRects = new Rectangle[SideButtonCount];
+        private readonly bool[] _sideHovered = new bool[SideButtonCount];
+        private bool _artifactHovered;
+        private Texture2D _texInvPanel, _texInvBtnDark, _texInvBtnGold;
+        private Texture2D _texInvCoinGold, _texInvCoinBund, _texInvCircle, _texInvGridRow;
+        private Texture2D _texInvSlotGreen, _texInvSlotRed, _texInvArtifactPlate;
+        private Texture2D _texInvCloseX, _texInvCloseXHover;
+        private readonly Dictionary<byte, Texture2D> _equipBoxTex = new();
+        private Texture2D _texInvBoxStar, _texInvBoxEarring, _texInvRect, _texInvField, _texInvTooltip;
+        private Rectangle _invRect1Rect, _invRect2Rect;
+
         private InventoryItem _hoveredItem;
         private Point _hoveredSlot = new(-1, -1);
         private int _hoveredEquipSlot = -1;
@@ -310,6 +328,8 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 {
                     _zenAmount = value;
                     UpdateZenText();
+                    // O valor agora é assado na superfície estática junto com a arte do campo.
+                    InvalidateStaticSurface();
                 }
             }
         }
@@ -336,6 +356,40 @@ namespace Client.Main.Controls.UI.Game.Inventory
 
             _layoutTexture = await tl.PrepareAndGetTexture(LayoutTexturePath);
             _slotTexture = _layoutTexture;
+
+            // ── Assets do visual NOVO (Interface/Inventory, extraídos do MU oficial) ──
+            async Task<Texture2D> L(string p) { try { return await tl.PrepareAndGetTexture(p); } catch { return null; } }
+            const string Dir = "Interface/Inventory/";
+            // Painel padrão de TODAS as janelas (panel-template, barra de título assada).
+            _texInvPanel = await L("Interface/Imprint/imprint_panel.OZP");
+            _texInvBtnDark = await L(Dir + "inv_btn_dark.OZP");
+            _texInvBtnGold = await L(Dir + "inv_btn_gold.OZP");
+            _texInvCoinGold = await L(Dir + "inv_coin_gold.OZP");
+            _texInvCoinBund = await L(Dir + "inv_coin_bund.OZP");
+            _texInvCircle = await L(Dir + "inv_circle.OZP");
+            _texInvGridRow = await L(Dir + "inv_grid_row.OZP");
+            _texInvSlotGreen = await L(Dir + "inv_slot_green.OZP");
+            _texInvSlotRed = await L(Dir + "inv_slot_red.OZP");
+            _texInvArtifactPlate = await L(Dir + "inv_artifact_plate.OZP");
+            _texInvBoxStar = await L(Dir + "inv_box_star.OZP");
+            _texInvBoxEarring = await L(Dir + "inv_box_earring.OZP");
+            _texInvRect = await L(Dir + "inv_rect.OZP");
+            _texInvField = await L(Dir + "inv_field.OZP");   // fundo de input (campos de moeda)
+            _texInvTooltip = await L(Dir + "inv_tooltip.OZP");   // fundo do tooltip de item
+            _texInvCloseX = await L("Interface/Imprint/imprint_close.OZP");
+            _texInvCloseXHover = await L("Interface/Imprint/imprint_close_hover.OZP");
+            _equipBoxTex[8] = await L(Dir + "inv_box_pet.OZP");
+            _equipBoxTex[9] = await L(Dir + "inv_box_pend.OZP");
+            _equipBoxTex[2] = await L(Dir + "inv_box_helm.OZP");
+            _equipBoxTex[7] = await L(Dir + "inv_box_wings.OZP");
+            _equipBoxTex[0] = await L(Dir + "inv_box_weapon.OZP");
+            _equipBoxTex[3] = await L(Dir + "inv_box_armor.OZP");
+            _equipBoxTex[1] = await L(Dir + "inv_box_shield.OZP");
+            _equipBoxTex[10] = await L(Dir + "inv_box_ring.OZP");
+            _equipBoxTex[11] = await L(Dir + "inv_box_ring.OZP");
+            _equipBoxTex[5] = await L(Dir + "inv_box_gloves.OZP");
+            _equipBoxTex[4] = await L(Dir + "inv_box_pants.OZP");
+            _equipBoxTex[6] = await L(Dir + "inv_box_boots.OZP");
 
             _font = GraphicsManager.Instance.Font;
 
@@ -411,6 +465,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             }
 
             Visible = false;
+            _expandedOpen = false;   // janela extra fecha junto
             if (Scene?.FocusControl == this)
             {
                 Scene.FocusControl = null;
@@ -551,6 +606,14 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 }
             }
 
+            // Janela Expanded fica FORA dos bounds do controle: consome o clique pra não
+            // vazar pro mundo (andar/atacar) quando o toque cai dentro dela.
+            if (_expandedOpen && (leftJustPressed || leftJustReleased) &&
+                Translate(_expPanelRect).Contains(mousePos))
+            {
+                Scene?.SetMouseInputConsumed();
+            }
+
             _pickedItemRenderer.Update(gameTime);
         }
 
@@ -599,6 +662,10 @@ namespace Client.Main.Controls.UI.Game.Inventory
                     spriteBatch.Draw(_staticSurface, DisplayRectangle, Color.White * Alpha);
                 }
 
+                // Janela EXPANDED (grade extra) — desenhada ao vivo (fica FORA do render
+                // target do painel principal, então não pode ir na superfície estática).
+                DrawExpandedWindow(spriteBatch);
+
                 // Draw overlays beneath items (consistent with vault/NPC shop)
                 DrawGridOverlays(spriteBatch);
                 DrawEquipHighlights(spriteBatch);
@@ -631,11 +698,10 @@ namespace Client.Main.Controls.UI.Game.Inventory
         {
             _texts.Clear();
 
-            // Title is now drawn in DrawModernHeader, so we skip the title text
-
-            // Zen text - positioned inside zen field
-            _zenText = CreateText(new Vector2(_zenFieldRect.X + 8, _zenFieldRect.Y + _zenFieldRect.Height * 0.5f - 6f),
-                                  12f, Theme.TextGold);
+            // Valores de moeda NÃO usam mais o sistema de _texts (posição estática):
+            // são desenhados em DrawMoneyValue, medidos e clampados DENTRO do campo.
+            // A entry sobrevive só pra UpdateZenText/Show/Hide não precisarem de guarda.
+            _zenText = new InventoryTextEntry(Vector2.Zero, 1f, Theme.TextGold, TextAlignment.Right);
             _zenText.Visible = false;
         }
 
@@ -716,92 +782,81 @@ namespace Client.Main.Controls.UI.Game.Inventory
 
         private void BuildLayoutMetrics()
         {
+            var L = typeof(Hud.InventoryLayout); // só pra deixar claro que TUDO vem do editor
+            _ = L;
+
             BuildEquipSlots();
 
-            // Header
+            // Faixa de arraste = topo da janela (barra de título).
             _headerRect = new Rectangle(0, 0, WINDOW_WIDTH, HEADER_HEIGHT);
 
-            // Equipment panel - centered, fixed height
-            int equipPanelWidth = WINDOW_WIDTH - PANEL_PADDING * 2;
-            int equipPanelTop = HEADER_HEIGHT + 8;
-            _paperdollPanelRect = new Rectangle(PANEL_PADDING, equipPanelTop, equipPanelWidth, EQUIP_SECTION_HEIGHT);
+            _titleBarRect = Rectangle.Empty;   // barra de título vem ASSADA no painel-template
+            _closeButtonRect = LR(Hud.InventoryLayout.CloseX, Hud.InventoryLayout.CloseY, Hud.InventoryLayout.CloseW, Hud.InventoryLayout.CloseH);
+            _circleRect = LR(Hud.InventoryLayout.CircleX, Hud.InventoryLayout.CircleY, Hud.InventoryLayout.CircleW, Hud.InventoryLayout.CircleH);
+            _artifactBtnRect = LR(Hud.InventoryLayout.ArtifactX, Hud.InventoryLayout.ArtifactY, Hud.InventoryLayout.ArtifactW, Hud.InventoryLayout.ArtifactH);
+            _starBoxRect = LR(Hud.InventoryLayout.StarBoxX, Hud.InventoryLayout.StarBoxY, Hud.InventoryLayout.StarBoxW, Hud.InventoryLayout.StarBoxH);
+            _earringLRect = LR(Hud.InventoryLayout.EarringLX, Hud.InventoryLayout.EarringLY, Hud.InventoryLayout.EarringLW, Hud.InventoryLayout.EarringLH);
+            _earringRRect = LR(Hud.InventoryLayout.EarringRX, Hud.InventoryLayout.EarringRY, Hud.InventoryLayout.EarringRW, Hud.InventoryLayout.EarringRH);
+            _invRect1Rect = LR(Hud.InventoryLayout.Rect1X, Hud.InventoryLayout.Rect1Y, Hud.InventoryLayout.Rect1W, Hud.InventoryLayout.Rect1H);
+            _invRect2Rect = LR(Hud.InventoryLayout.Rect2X, Hud.InventoryLayout.Rect2Y, Hud.InventoryLayout.Rect2W, Hud.InventoryLayout.Rect2H);
+            _expPanelRect = LR(Hud.InventoryLayout.ExpPanelX, Hud.InventoryLayout.ExpPanelY, Hud.InventoryLayout.ExpPanelW, Hud.InventoryLayout.ExpPanelH);
+            _expRectRect = LR(Hud.InventoryLayout.ExpRectX, Hud.InventoryLayout.ExpRectY, Hud.InventoryLayout.ExpRectW, Hud.InventoryLayout.ExpRectH);
+            _expCloseRect = LR(Hud.InventoryLayout.ExpCloseX, Hud.InventoryLayout.ExpCloseY, Hud.InventoryLayout.ExpCloseW, Hud.InventoryLayout.ExpCloseH);
 
-            // Grid section - positioned BELOW equipment with proper spacing
             int gridTotalWidth = Columns * INVENTORY_SQUARE_WIDTH;
             int gridTotalHeight = Rows * INVENTORY_SQUARE_HEIGHT;
-            int gridX = (WINDOW_WIDTH - gridTotalWidth) / 2;
-            int minGridY = _paperdollPanelRect.Bottom + Math.Max(SECTION_SPACING / 2, 4);
-            int gridY = minGridY;
+            _gridRect = new Rectangle((int)Hud.InventoryLayout.GridX, (int)Hud.InventoryLayout.GridY, gridTotalWidth, gridTotalHeight);
+            _gridFrameRect = new Rectangle(_gridRect.X - 8, _gridRect.Y - 8, gridTotalWidth + 16, gridTotalHeight + 16);
 
-            int footerHeight = 50;
-            int footerTop = WINDOW_HEIGHT - footerHeight - 10;
-
-            // Ensure grid section does not overlap footer
-            int availableBottom = footerTop - SECTION_SPACING;
-            int maxGridY = Math.Max(minGridY, availableBottom - gridTotalHeight - 8);
-            gridY = Math.Min(gridY, maxGridY);
-            if (gridY < minGridY)
+            // Coluna de botões laterais (Repair / Disassemble / Bundle / Divide / Personal S / Expanded).
+            for (int i = 0; i < SideButtonCount; i++)
             {
-                gridY = minGridY;
+                _sideButtonRects[i] = LR(
+                    Hud.InventoryLayout.SideBtnX,
+                    Hud.InventoryLayout.SideBtnY + i * Hud.InventoryLayout.SideBtnPitch,
+                    Hud.InventoryLayout.SideBtnW,
+                    Hud.InventoryLayout.SideBtnH);
             }
 
-            _gridRect = new Rectangle(gridX, gridY, gridTotalWidth, gridTotalHeight);
-            _gridFrameRect = new Rectangle(gridX - 8, gridY - 8, gridTotalWidth + 16, gridTotalHeight + 16);
+            // Rodapé de moedas.
+            _zenIconRect = LR(Hud.InventoryLayout.CoinZenX, Hud.InventoryLayout.CoinZenY, Hud.InventoryLayout.CoinZenW, Hud.InventoryLayout.CoinZenH);
+            _zenFieldRect = LR(Hud.InventoryLayout.FieldZenX, Hud.InventoryLayout.FieldZenY, Hud.InventoryLayout.FieldZenW, Hud.InventoryLayout.FieldZenH);
+            _bundIconRect = LR(Hud.InventoryLayout.CoinBundX, Hud.InventoryLayout.CoinBundY, Hud.InventoryLayout.CoinBundW, Hud.InventoryLayout.CoinBundH);
+            _bundFieldRect = LR(Hud.InventoryLayout.FieldBundX, Hud.InventoryLayout.FieldBundY, Hud.InventoryLayout.FieldBundW, Hud.InventoryLayout.FieldBundH);
 
-            // Footer - at bottom
-            _footerRect = new Rectangle(PANEL_PADDING, footerTop,
-                                         WINDOW_WIDTH - PANEL_PADDING * 2, footerHeight);
-
-            // Zen display
-            _zenIconRect = new Rectangle(_footerRect.X + 12, _footerRect.Y + 14, 22, 22);
-            _zenFieldRect = new Rectangle(_zenIconRect.Right + 10, _footerRect.Y + 10, 160, 30);
-
-            // Buttons
-            int btnSize = 38;
-            _closeButtonRect = new Rectangle(WINDOW_WIDTH - btnSize - 12, 10, btnSize, btnSize);
-            _footerLeftButtonRect = new Rectangle(_footerRect.Right - btnSize * 2 - 20, _footerRect.Y + 6, btnSize, btnSize);
-            _footerRightButtonRect = new Rectangle(_footerRect.Right - btnSize - 8, _footerRect.Y + 6, btnSize, btnSize);
-
-            // Beam rect not used in new design
+            // Rects herdados do design antigo que não existem mais.
+            _paperdollPanelRect = Rectangle.Empty;
+            _footerRect = Rectangle.Empty;
+            _footerLeftButtonRect = Rectangle.Empty;
+            _footerRightButtonRect = Rectangle.Empty;
             _beamRect = Rectangle.Empty;
         }
+
+        private static Rectangle LR(float x, float y, float w, float h)
+            => new((int)x, (int)y, (int)w, (int)h);
 
         private void BuildEquipSlots()
         {
             _equipSlots.Clear();
 
-            int cell = INVENTORY_SQUARE_WIDTH;
-            int panelCenterX = WINDOW_WIDTH / 2;
-            int baseY = HEADER_HEIGHT + 20;
-
-            // Left column (pet, left-hand weapon, gloves)
-            int leftColX = panelCenterX - cell * 4 - 24;
-            AddEquipSlot(8, new Point(leftColX, baseY), new Point(2, 2), "PET");
-            AddEquipSlot(0, new Point(leftColX, baseY + cell * 2 + 8), new Point(2, 3), "L.HAND");
-            AddEquipSlot(5, new Point(leftColX, baseY + cell * 5 + 16), new Point(2, 2), "GLOVES");
-
-            // Center column (helm, armor, pants + rings/pendant)
-            int centerColX = panelCenterX - cell;
-            AddEquipSlot(2, new Point(centerColX, baseY), new Point(2, 2), "HELM");
-            AddEquipSlot(3, new Point(centerColX, baseY + cell * 2 + 8), new Point(2, 3), "ARMOR");
-            AddEquipSlot(4, new Point(centerColX, baseY + cell * 5 + 16), new Point(2, 2), "PANTS");
-
-            // Rings and pendant next to the center column
-            int accessoryOffset = 6;
-            AddEquipSlot(9, new Point(centerColX - cell - accessoryOffset, baseY + cell * 2 + 20), new Point(1, 1), "PEND");
-            AddEquipSlot(10, new Point(centerColX - cell - accessoryOffset, baseY + cell * 5 + 28), new Point(1, 1), "RING");
-            AddEquipSlot(11, new Point(centerColX + cell * 2 + accessoryOffset, baseY + cell * 5 + 28), new Point(1, 1), "RING");
-
-            // Right column (wings, right-hand weapon, boots)
-            int rightColX = panelCenterX + cell * 2 + 16;
-            AddEquipSlot(7, new Point(rightColX - cell / 2, baseY - 4), new Point(3, 2), "WINGS");
-            AddEquipSlot(1, new Point(rightColX, baseY + cell * 2 + 8), new Point(2, 3), "R.HAND");
-            AddEquipSlot(6, new Point(rightColX, baseY + cell * 5 + 16), new Point(2, 2), "BOOTS");
+            // Slots com rects LIVRES do editor (não presos à célula da grade).
+            AddEquipSlot(8, LR(Hud.InventoryLayout.PetX, Hud.InventoryLayout.PetY, Hud.InventoryLayout.PetW, Hud.InventoryLayout.PetH), "PET");
+            AddEquipSlot(9, LR(Hud.InventoryLayout.PendX, Hud.InventoryLayout.PendY, Hud.InventoryLayout.PendW, Hud.InventoryLayout.PendH), "PEND");
+            AddEquipSlot(2, LR(Hud.InventoryLayout.HelmX, Hud.InventoryLayout.HelmY, Hud.InventoryLayout.HelmW, Hud.InventoryLayout.HelmH), "HELM");
+            AddEquipSlot(7, LR(Hud.InventoryLayout.WingsX, Hud.InventoryLayout.WingsY, Hud.InventoryLayout.WingsW, Hud.InventoryLayout.WingsH), "WINGS");
+            AddEquipSlot(0, LR(Hud.InventoryLayout.WeaponX, Hud.InventoryLayout.WeaponY, Hud.InventoryLayout.WeaponW, Hud.InventoryLayout.WeaponH), "L.HAND");
+            AddEquipSlot(3, LR(Hud.InventoryLayout.ArmorX, Hud.InventoryLayout.ArmorY, Hud.InventoryLayout.ArmorW, Hud.InventoryLayout.ArmorH), "ARMOR");
+            AddEquipSlot(1, LR(Hud.InventoryLayout.ShieldX, Hud.InventoryLayout.ShieldY, Hud.InventoryLayout.ShieldW, Hud.InventoryLayout.ShieldH), "R.HAND");
+            AddEquipSlot(10, LR(Hud.InventoryLayout.Ring1X, Hud.InventoryLayout.Ring1Y, Hud.InventoryLayout.Ring1W, Hud.InventoryLayout.Ring1H), "RING");
+            AddEquipSlot(11, LR(Hud.InventoryLayout.Ring2X, Hud.InventoryLayout.Ring2Y, Hud.InventoryLayout.Ring2W, Hud.InventoryLayout.Ring2H), "RING");
+            AddEquipSlot(5, LR(Hud.InventoryLayout.GlovesX, Hud.InventoryLayout.GlovesY, Hud.InventoryLayout.GlovesW, Hud.InventoryLayout.GlovesH), "GLOVES");
+            AddEquipSlot(4, LR(Hud.InventoryLayout.PantsX, Hud.InventoryLayout.PantsY, Hud.InventoryLayout.PantsW, Hud.InventoryLayout.PantsH), "PANTS");
+            AddEquipSlot(6, LR(Hud.InventoryLayout.BootsX, Hud.InventoryLayout.BootsY, Hud.InventoryLayout.BootsW, Hud.InventoryLayout.BootsH), "BOOTS");
         }
 
-        private void AddEquipSlot(byte slot, Point origin, Point size, string ghostLabel, bool accentRed = false)
+        private void AddEquipSlot(byte slot, Rectangle rect, string ghostLabel, bool accentRed = false)
         {
-            var rect = new Rectangle(origin.X, origin.Y, size.X * INVENTORY_SQUARE_WIDTH, size.Y * INVENTORY_SQUARE_HEIGHT);
+            var size = new Point(Math.Max(1, rect.Width / INVENTORY_SQUARE_WIDTH), Math.Max(1, rect.Height / INVENTORY_SQUARE_HEIGHT));
             _equipSlots[slot] = new EquipSlotLayout(slot, rect, size, ghostLabel, accentRed);
         }
 
@@ -833,15 +888,23 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 return;
             }
 
+            // SUPERAMOSTRAGEM: renderiza a superfície já na resolução FÍSICA da tela
+            // (fator do UiScaler). Sem isso, textos eram rasterizados no espaço local
+            // (396px de largura) e re-escalados pra cima → rótulos borrados/ilegíveis.
+            float k = MathF.Max(1f, UiScaler.Scale * Constants.RENDER_SCALE);
+            int rw = (int)MathF.Ceiling(WINDOW_WIDTH * k);
+            int rh = (int)MathF.Ceiling(WINDOW_HEIGHT * k);
+
             _staticSurface?.Dispose();
-            _staticSurface = new RenderTarget2D(graphicsDevice, WINDOW_WIDTH, WINDOW_HEIGHT, false, SurfaceFormat.Color, DepthFormat.None);
+            _staticSurface = new RenderTarget2D(graphicsDevice, rw, rh, false, SurfaceFormat.Color, DepthFormat.None);
 
             var previousTargets = graphicsDevice.GetRenderTargets();
             graphicsDevice.SetRenderTarget(_staticSurface);
             graphicsDevice.Clear(Color.Transparent);
 
             var spriteBatch = GraphicsManager.Instance.Sprite;
-            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend))
+            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend,
+                       GraphicsManager.GetQualityLinearSamplerState(), transform: Matrix.CreateScale(k, k, 1f)))
             {
                 DrawStaticElements(spriteBatch);
             }
@@ -925,6 +988,108 @@ namespace Client.Main.Controls.UI.Game.Inventory
                                    0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         }
 
+        private static bool Tex(Texture2D t) => t != null && !t.IsDisposed;
+
+        // Rótulo de botão lateral: AUTO-AJUSTA pra nunca passar da placa (encolhe se a
+        // fonte configurada não couber). Normal = claro c/ sombra; dourado = texto escuro
+        // GRAVADO com relevo claro (estilo MU), legível sobre a placa dourada.
+        private void DrawSideButtonLabel(SpriteBatch sb, Rectangle rect, string label, bool goldState)
+        {
+            if (_font == null || string.IsNullOrEmpty(label)) return;
+            float s = Hud.InventoryLayout.SideBtnFont / 25f;
+            Vector2 size = _font.MeasureString(label) * s;
+            float maxW = rect.Width - 10f;
+            if (size.X > maxW && size.X > 0f)
+            {
+                s *= maxW / size.X;
+                size = _font.MeasureString(label) * s;
+            }
+            var pos = new Vector2(rect.X + (rect.Width - size.X) / 2f, rect.Y + (rect.Height - size.Y) / 2f + 1f);
+            // BRANCO nos dois estados (pedido do usuário) — sombra preta segura o contraste
+            // tanto na placa escura quanto na dourada.
+            sb.DrawString(_font, label, pos + Vector2.One, Color.Black * (goldState ? 0.75f : 0.6f), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            sb.DrawString(_font, label, pos, goldState ? Color.White : new Color(225, 218, 200), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+        }
+
+        // Janela "Expanded": painel-template + moldura interna + grade 100% preenchida.
+        // Visual por enquanto (slots extras dependem de inventário estendido no servidor).
+        private void DrawExpandedWindow(SpriteBatch sb)
+        {
+            if (!_expandedOpen || !Hud.InventoryLayout.ExpPanelEnabled) return;
+
+            var panel = Translate(_expPanelRect);
+            if (Tex(_texInvPanel)) sb.Draw(_texInvPanel, panel, Color.White);
+            else if (GraphicsManager.Instance?.Pixel != null)
+                sb.Draw(GraphicsManager.Instance.Pixel, panel, new Color(24, 20, 18) * 0.97f);
+
+            // Título sobre a barra vermelha assada do template.
+            if (Hud.InventoryLayout.ExpTitleEnabled && _font != null &&
+                !string.IsNullOrEmpty(Hud.InventoryLayout.ExpTitleMessage))
+            {
+                string t = Hud.InventoryLayout.ExpTitleMessage;
+                float ts = Hud.InventoryLayout.ExpTitleFont / 25f;
+                Vector2 size = _font.MeasureString(t) * ts;
+                var pos = new Vector2(
+                    DisplayRectangle.X + Hud.InventoryLayout.ExpTitleTextX - size.X / 2f,
+                    DisplayRectangle.Y + Hud.InventoryLayout.ExpTitleTextY - size.Y / 2f);
+                sb.DrawString(_font, t, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+                sb.DrawString(_font, t, pos, new Color(235, 210, 150), 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+            }
+
+            // Botão X próprio (fecha só a Expanded).
+            if (Hud.InventoryLayout.ExpCloseEnabled)
+            {
+                var closeTex = _expCloseHovered ? (_texInvCloseXHover ?? _texInvCloseX) : _texInvCloseX;
+                if (Tex(closeTex)) sb.Draw(closeTex, Translate(_expCloseRect), Color.White);
+            }
+
+            if (Hud.InventoryLayout.ExpRectEnabled && Tex(_texInvRect))
+                Draw9SliceRect(sb, _texInvRect, Translate(_expRectRect));
+
+            if (Hud.InventoryLayout.ExpGridEnabled && Tex(_texInvGridRow))
+            {
+                // Células ESTICAM pra preencher a área exata (bordas calculadas por
+                // acumulação — sem lacunas de arredondamento entre células).
+                int cols = Hud.InventoryLayout.ExpGridCols;
+                int rows = Hud.InventoryLayout.ExpGridRows;
+                float gx = Hud.InventoryLayout.ExpGridX, gy = Hud.InventoryLayout.ExpGridY;
+                float gw = Hud.InventoryLayout.ExpGridW, gh = Hud.InventoryLayout.ExpGridH;
+                int cellSrcW = _texInvGridRow.Width / 8;
+                for (int r = 0; r < rows; r++)
+                {
+                    int y0 = (int)(gy + gh * r / rows);
+                    int y1 = (int)(gy + gh * (r + 1) / rows);
+                    for (int c = 0; c < cols; c++)
+                    {
+                        int x0 = (int)(gx + gw * c / cols);
+                        int x1 = (int)(gx + gw * (c + 1) / cols);
+                        var cell = Translate(new Rectangle(x0, y0, x1 - x0, y1 - y0));
+                        var src = new Rectangle(cellSrcW * (c % 8), 0, cellSrcW, _texInvGridRow.Height);
+                        sb.Draw(_texInvGridRow, cell, src, Color.White);
+                    }
+                }
+            }
+        }
+
+        // 9-slice pra moldura inv_rect (borda ~8px): cantos em tamanho fixo, bordas esticam
+        // só no eixo longo, centro (transparente) preenche o resto.
+        private static void Draw9SliceRect(SpriteBatch sb, Texture2D tex, Rectangle dst, int m = 8)
+        {
+            int tw = tex.Width, th = tex.Height;
+            if (dst.Width < m * 2 + 2 || dst.Height < m * 2 + 2) { sb.Draw(tex, dst, Color.White); return; }
+            int cx = tw - 2 * m, cy = th - 2 * m;
+            int dcx = dst.Width - 2 * m, dcy = dst.Height - 2 * m;
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y, m, m), new Rectangle(0, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y, m, m), new Rectangle(tw - m, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Bottom - m, m, m), new Rectangle(0, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Bottom - m, m, m), new Rectangle(tw - m, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y, dcx, m), new Rectangle(m, 0, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Bottom - m, dcx, m), new Rectangle(m, th - m, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y + m, m, dcy), new Rectangle(0, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y + m, m, dcy), new Rectangle(tw - m, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y + m, dcx, dcy), new Rectangle(m, m, cx, cy), Color.White);
+        }
+
         private void DrawStaticElements(SpriteBatch spriteBatch)
         {
             var pixel = GraphicsManager.Instance.Pixel;
@@ -932,30 +1097,96 @@ namespace Client.Main.Controls.UI.Game.Inventory
 
             var fullRect = new Rectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-            // ═══════════════════════════════════════════════════════════
-            // 1. MAIN WINDOW BACKGROUND
-            // ═══════════════════════════════════════════════════════════
-            DrawWindowBackground(spriteBatch, fullRect);
+            // 1. Painel de fundo (arte oficial). Fallback: fundo procedural antigo.
+            if (Tex(_texInvPanel)) spriteBatch.Draw(_texInvPanel, fullRect, Color.White);
+            else DrawWindowBackground(spriteBatch, fullRect);
 
-            // ═══════════════════════════════════════════════════════════
-            // 2. HEADER
-            // ═══════════════════════════════════════════════════════════
-            DrawModernHeader(spriteBatch);
+            // 1b. Molduras livres (9-slice: cantos fixos, bordas esticam sem deformar).
+            if (Hud.InventoryLayout.Rect1Enabled && Tex(_texInvRect)) Draw9SliceRect(spriteBatch, _texInvRect, _invRect1Rect);
+            if (Hud.InventoryLayout.Rect2Enabled && Tex(_texInvRect)) Draw9SliceRect(spriteBatch, _texInvRect, _invRect2Rect);
 
-            // ═══════════════════════════════════════════════════════════
-            // 3. EQUIPMENT SECTION
-            // ═══════════════════════════════════════════════════════════
-            DrawModernEquipSection(spriteBatch);
+            // 2. Texto do título (a barra vermelha já vem assada no painel-template).
+            if (Hud.InventoryLayout.TitleTextEnabled && _font != null)
+            {
+                string title = "Inventory";
+                float ts = Hud.InventoryLayout.TitleTextFont / 25f;
+                Vector2 size = _font.MeasureString(title) * ts;
+                var pos = new Vector2(Hud.InventoryLayout.TitleTextX - size.X / 2f,
+                                      Hud.InventoryLayout.TitleTextY - size.Y / 2f);
+                spriteBatch.DrawString(_font, title, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+                spriteBatch.DrawString(_font, title, pos, new Color(235, 210, 150), 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+            }
 
-            // ═══════════════════════════════════════════════════════════
-            // 4. INVENTORY GRID SECTION
-            // ═══════════════════════════════════════════════════════════
-            DrawModernGridSection(spriteBatch);
+            // 3. Equipamento: círculo ornamentado + molduras por tipo (arte com ícone assado).
+            if (Hud.InventoryLayout.CircleEnabled && Tex(_texInvCircle))
+                spriteBatch.Draw(_texInvCircle, _circleRect, Color.White * 0.35f);
+            foreach (var kv in _equipSlots)
+            {
+                if (_equipBoxTex.TryGetValue(kv.Key, out var box) && Tex(box))
+                    spriteBatch.Draw(box, kv.Value.Rect, Color.White);
+            }
 
-            // ═══════════════════════════════════════════════════════════
-            // 5. FOOTER
-            // ═══════════════════════════════════════════════════════════
-            DrawModernFooter(spriteBatch);
+            // Brincos (decorativos por enquanto — sem slot id no servidor). Arte PRÓPRIA
+            // (inv_box_earring); a inv_box_pend é só do slot especial ao lado do elmo.
+            if (Tex(_texInvBoxEarring))
+            {
+                if (Hud.InventoryLayout.EarringLEnabled) spriteBatch.Draw(_texInvBoxEarring, _earringLRect, Color.White);
+                if (Hud.InventoryLayout.EarringREnabled) spriteBatch.Draw(_texInvBoxEarring, _earringRRect, Color.White);
+            }
+
+            // Botão Artifact (só a placa — rótulo removido a pedido) e slot estrela.
+            if (Hud.InventoryLayout.ArtifactEnabled && Tex(_texInvArtifactPlate))
+                spriteBatch.Draw(_texInvArtifactPlate, _artifactBtnRect, Color.White);
+            if (Hud.InventoryLayout.StarBoxEnabled && Tex(_texInvBoxStar))
+                spriteBatch.Draw(_texInvBoxStar, _starBoxRect, Color.White);
+
+            // 4. Grade: célula a célula (a strip tem 8 células; recorta 1 por vez pra
+            //    não distorcer quando GridCols != 8).
+            if (Hud.InventoryLayout.GridEnabled && Tex(_texInvGridRow))
+            {
+                int cellSrcW = _texInvGridRow.Width / 8;
+                for (int r = 0; r < Rows; r++)
+                {
+                    for (int c = 0; c < Columns; c++)
+                    {
+                        var cellRect = new Rectangle(_gridRect.X + c * INVENTORY_SQUARE_WIDTH,
+                                                     _gridRect.Y + r * INVENTORY_SQUARE_HEIGHT,
+                                                     INVENTORY_SQUARE_WIDTH, INVENTORY_SQUARE_HEIGHT);
+                        var src = new Rectangle(cellSrcW * (c % 8), 0, cellSrcW, _texInvGridRow.Height);
+                        spriteBatch.Draw(_texInvGridRow, cellRect, src, Color.White);
+                    }
+                }
+            }
+
+            // 5. Botões laterais (placas; hover/estado desenhado no DrawChrome por cima).
+            if (Hud.InventoryLayout.SideBtnsEnabled)
+            {
+                for (int i = 0; i < SideButtonCount; i++)
+                {
+                    if (Tex(_texInvBtnDark)) spriteBatch.Draw(_texInvBtnDark, _sideButtonRects[i], Color.White);
+                    DrawSideButtonLabel(spriteBatch, _sideButtonRects[i], SideButtonLabels[i], goldState: false);
+                }
+            }
+
+            // 6. Rodapé de moedas: campos + ícones + VALORES na MESMA superfície (mesmas
+            // coordenadas locais da arte — impossível desalinhar). O valor do zen invalida
+            // a superfície quando muda (ZenAmount setter).
+            if (Hud.InventoryLayout.MoneyEnabled)
+            {
+                // Fundo de INPUT correto (background-text-input) — a placa de botão tinha
+                // bisel grosso assado e "comia" a área útil, fazendo o texto parecer fora.
+                var fieldTex = Tex(_texInvField) ? _texInvField : _texInvBtnDark;
+                if (Tex(fieldTex))
+                {
+                    spriteBatch.Draw(fieldTex, _zenFieldRect, Color.White);
+                    spriteBatch.Draw(fieldTex, _bundFieldRect, Color.White);
+                }
+                if (Tex(_texInvCoinGold)) spriteBatch.Draw(_texInvCoinGold, _zenIconRect, Color.White);
+                if (Tex(_texInvCoinBund)) spriteBatch.Draw(_texInvCoinBund, _bundIconRect, Color.White);
+                DrawMoneyValue(spriteBatch, _zenFieldRect,
+                    ZenAmount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture));
+                DrawMoneyValue(spriteBatch, _bundFieldRect, "0");
+            }
         }
 
         private void DrawModernHeader(SpriteBatch spriteBatch)
@@ -1285,13 +1516,13 @@ namespace Client.Main.Controls.UI.Game.Inventory
 
         private void UpdateChromeHover(Point mousePos)
         {
-            var closeRect = Translate(_closeButtonRect);
-            var leftRect = Translate(_footerLeftButtonRect);
-            var rightRect = Translate(_footerRightButtonRect);
-
-            _closeHovered = closeRect.Contains(mousePos);
-            _leftFooterHovered = leftRect.Contains(mousePos);
-            _rightFooterHovered = rightRect.Contains(mousePos);
+            _closeHovered = Translate(_closeButtonRect).Contains(mousePos);
+            _leftFooterHovered = false;
+            _rightFooterHovered = false;
+            _artifactHovered = Hud.InventoryLayout.ArtifactEnabled && Translate(_artifactBtnRect).Contains(mousePos);
+            _expCloseHovered = _expandedOpen && Hud.InventoryLayout.ExpCloseEnabled && Translate(_expCloseRect).Contains(mousePos);
+            for (int i = 0; i < SideButtonCount; i++)
+                _sideHovered[i] = Hud.InventoryLayout.SideBtnsEnabled && Translate(_sideButtonRects[i]).Contains(mousePos);
         }
 
         private bool HandleChromeClick()
@@ -1302,15 +1533,37 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 return true;
             }
 
-            if (_leftFooterHovered)
+            if (_expCloseHovered)
             {
-                Hide();
+                _expandedOpen = false;   // X da janela Expanded fecha SÓ ela
+                SoundController.Instance.PlayBuffer("Sound/iButton.wav");
                 return true;
             }
 
-            if (_rightFooterHovered)
+            if (_artifactHovered)
             {
-                ToggleRepairMode();
+                // Tela de Artifact ainda não implementada — só o feedback de clique.
+                SoundController.Instance.PlayBuffer("Sound/iButton.wav");
+                return true;
+            }
+
+            for (int i = 0; i < SideButtonCount; i++)
+            {
+                if (!_sideHovered[i]) continue;
+                if (i == 0)
+                {
+                    ToggleRepairMode();   // Repair = único já funcional
+                }
+                else if (i == 5)
+                {
+                    _expandedOpen = !_expandedOpen;   // janela extra de slots (visual)
+                    SoundController.Instance.PlayBuffer("Sound/iButton.wav");
+                }
+                else
+                {
+                    // Disassemble/Bundle/Divide/Personal Store: placeholders.
+                    SoundController.Instance.PlayBuffer("Sound/iButton.wav");
+                }
                 return true;
             }
 
@@ -2154,29 +2407,44 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 if (state?.PendingMoveFromSlot == itemSlotIndex)
                     continue;
 
+                var (effW, effH) = EffectiveGridDims(item);
                 Rectangle itemRect = new(
                     gridTopLeft.X + item.GridPosition.X * INVENTORY_SQUARE_WIDTH,
                     gridTopLeft.Y + item.GridPosition.Y * INVENTORY_SQUARE_HEIGHT,
-                    item.Definition.Width * INVENTORY_SQUARE_WIDTH,
-                    item.Definition.Height * INVENTORY_SQUARE_HEIGHT);
+                    effW * INVENTORY_SQUARE_WIDTH,
+                    effH * INVENTORY_SQUARE_HEIGHT);
 
-                // Item glow effect
+                // FUNDO alinhado ao footprint (cravado nas linhas da grade, referência
+                // oficial do mobile); só o ÍCONE tem margem e o glow fica para DENTRO
+                // (era o glow externo que pintava por cima dos vizinhos).
+                const int iconInset = 2;
+
+                // Fundo VERDE por trás do item (estilo MU oficial: célula ocupada ganha glow).
+                if (Tex(_texInvSlotGreen))
+                {
+                    spriteBatch.Draw(_texInvSlotGreen, itemRect, Color.White * 0.9f);
+                }
+
+                // Item glow effect — para dentro, sem cobrir a linha da grade.
                 Color glowColor = ItemUiHelper.GetItemGlowColor(item, GlowPalette);
                 if (glowColor.A > 0)
                 {
-                    ItemUiHelper.DrawItemGlow(spriteBatch, pixel, itemRect, glowColor);
+                    var glowRect = new Rectangle(itemRect.X + 1, itemRect.Y + 1,
+                                                 itemRect.Width - 2, itemRect.Height - 2);
+                    ItemUiHelper.DrawItemGlow(spriteBatch, pixel, glowRect, glowColor);
                 }
 
-                // Item texture
-                Texture2D itemTexture = ResolveItemTexture(item, itemRect.Width, itemRect.Height);
+                // Item texture — fit com proporção, margem pequena.
+                Texture2D itemTexture = ResolveItemTexture(item, itemRect.Width - iconInset * 2, itemRect.Height - iconInset * 2);
 
                 if (itemTexture != null)
                 {
-                    spriteBatch.Draw(itemTexture, itemRect, Color.White);
+                    Rectangle iconRect = ItemGridRenderHelper.FitRect(itemRect, itemTexture.Width, itemTexture.Height, iconInset);
+                    spriteBatch.Draw(itemTexture, iconRect, Color.White);
 
                     if (JewelShineOverlay.ShouldShine(item))
                     {
-                        jewelEntries.Add((item, itemRect));
+                        jewelEntries.Add((item, iconRect));
                     }
                 }
                 else
@@ -2221,11 +2489,15 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 var item = kv.Value;
                 Rectangle itemRect = Translate(slot.Rect);
 
-                Texture2D itemTexture = ResolveItemTexture(item, itemRect.Width, itemRect.Height);
+                // O rect do editor inclui a moldura decorativa da inv_box_*: inset maior
+                // + fit pra arte não sentar por cima da moldura.
+                const int equipInset = 6;
+                Texture2D itemTexture = ResolveItemTexture(item, itemRect.Width - equipInset * 2, itemRect.Height - equipInset * 2);
 
                 if (itemTexture != null)
                 {
-                    spriteBatch.Draw(itemTexture, itemRect, Color.White);
+                    Rectangle iconRect = ItemGridRenderHelper.FitRect(itemRect, itemTexture.Width, itemTexture.Height, equipInset);
+                    spriteBatch.Draw(itemTexture, iconRect, Color.White);
                 }
                 else if (GraphicsManager.Instance?.Pixel != null)
                 {
@@ -2343,31 +2615,20 @@ namespace Client.Main.Controls.UI.Game.Inventory
                     bool canPlace = CanPlaceItem(dragged, _hoveredSlot);
                     Color overlay = canPlace ? Color.GreenYellow * 0.5f : Color.Red * 0.6f;
 
+                    // Clamp na borda da grade: dims cruas pintavam além da última coluna/linha.
+                    int dropW = Math.Min(Math.Max(1, dragged.Definition.Width), Columns - _hoveredSlot.X);
+                    int dropH = Math.Min(Math.Max(1, dragged.Definition.Height), Rows - _hoveredSlot.Y);
                     Rectangle dropRect = new(
                         gridRect.X + _hoveredSlot.X * INVENTORY_SQUARE_WIDTH,
                         gridRect.Y + _hoveredSlot.Y * INVENTORY_SQUARE_HEIGHT,
-                        dragged.Definition.Width * INVENTORY_SQUARE_WIDTH,
-                        dragged.Definition.Height * INVENTORY_SQUARE_HEIGHT);
+                        dropW * INVENTORY_SQUARE_WIDTH,
+                        dropH * INVENTORY_SQUARE_HEIGHT);
 
                     spriteBatch.Draw(pixel, dropRect, overlay);
                 }
             }
-            else
-            {
-                // Match vault/NPC shop hover overlays: highlight hovered slot and occupied slots only
-                ItemGridRenderHelper.DrawGridOverlays(
-                    spriteBatch,
-                    pixel,
-                    DisplayRectangle,
-                    _gridRect,
-                    _hoveredItem,
-                    _hoveredSlot,
-                    INVENTORY_SQUARE_WIDTH,
-                    INVENTORY_SQUARE_HEIGHT,
-                    Theme.SlotHover,
-                    Theme.Secondary,
-                    Alpha);
-            }
+            // Sem highlight de hover/célula fora do drag (mobile é touch: o quadrado claro
+            // ficava preso no último toque e o do item usava dims cruas — "vazava" do slot).
         }
 
         private void DrawEquipHighlights(SpriteBatch spriteBatch)
@@ -2436,49 +2697,73 @@ namespace Client.Main.Controls.UI.Game.Inventory
             }
 
             DrawCloseButton(spriteBatch);
-            DrawFooterButton(spriteBatch, _footerLeftButtonRect, "X", _leftFooterHovered);
-            string buttonText = (_networkManager?.GetCharacterState()?.Level >= _repairEnableLevel) ? "R" : "+";
-            DrawFooterButton(spriteBatch, _footerRightButtonRect, buttonText, _rightFooterHovered);
+
+            // Estados dinâmicos dos botões laterais: hover = clareia; Repair ativo = placa dourada.
+            var pixel = GraphicsManager.Instance.Pixel;
+            for (int i = 0; i < SideButtonCount; i++)
+            {
+                var rect = Translate(_sideButtonRects[i]);
+                bool goldState = (i == 0 && _isRepairMode) || (i == 5 && _expandedOpen);
+                if (goldState && Tex(_texInvBtnGold))
+                {
+                    // OPACA: com alpha, o rótulo assado por baixo vazava e duplicava o texto.
+                    spriteBatch.Draw(_texInvBtnGold, rect, Color.White);
+                    DrawSideButtonLabel(spriteBatch, rect, SideButtonLabels[i], goldState: true);
+                }
+                else if (_sideHovered[i])
+                {
+                    spriteBatch.Draw(pixel, rect, Color.White * 0.12f);
+                }
+            }
+            if (_artifactHovered)
+            {
+                spriteBatch.Draw(pixel, Translate(_artifactBtnRect), Color.White * 0.12f);
+            }
+
+        }
+
+        // Desenha o valor DENTRO da superfície estática, em coordenadas LOCAIS do campo
+        // (mesmo espaço da arte). Direita com 10px de padding; centro vertical; encolhe
+        // se não couber; clamp final garante que nunca passa das bordas.
+        private void DrawMoneyValue(SpriteBatch spriteBatch, Rectangle field, string text)
+        {
+            if (_font == null || string.IsNullOrEmpty(text)) return;
+            float s = Hud.InventoryLayout.MoneyFont / 25f;
+            Vector2 size = _font.MeasureString(text) * s;
+            float maxW = field.Width - 20f;
+            if (size.X > maxW && size.X > 0f)
+            {
+                s *= maxW / size.X;                       // número comprido: encolhe pra caber
+                size = _font.MeasureString(text) * s;
+            }
+            var pos = new Vector2(field.Right - 10f - size.X, field.Y + (field.Height - size.Y) / 2f + 1f);
+            pos.Y = MathHelper.Clamp(pos.Y, field.Y, Math.Max(field.Y, field.Bottom - size.Y));
+            spriteBatch.DrawString(_font, text, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            // Vermelho do MU oficial (referência do usuário) pros valores de moeda.
+            spriteBatch.DrawString(_font, text, pos, new Color(212, 62, 42), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
         }
 
         private void DrawCloseButton(SpriteBatch spriteBatch)
         {
             var rect = Translate(_closeButtonRect);
-            var pixel = GraphicsManager.Instance.Pixel;
-            if (pixel == null) return;
 
-            bool hovered = _closeHovered;
-
-            // Hover glow
-            if (hovered)
+            // Arte oficial do X (mesma do Imprint); fallback: X em texto.
+            var tex = _closeHovered ? (_texInvCloseXHover ?? _texInvCloseX) : _texInvCloseX;
+            if (Tex(tex))
             {
-                var glowRect = new Rectangle(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6);
-                spriteBatch.Draw(pixel, glowRect, Theme.Danger * 0.3f);
+                spriteBatch.Draw(tex, rect, Color.White);
+                return;
             }
 
-            // Button background - circular feel with rounded corners simulated
-            Color bgColor = hovered ? new Color(180, 60, 50) : new Color(140, 50, 45);
-            spriteBatch.Draw(pixel, rect, bgColor);
-
-            // Highlight
-            spriteBatch.Draw(pixel, new Rectangle(rect.X, rect.Y, rect.Width, 2),
-                            hovered ? new Color(255, 120, 100) : new Color(200, 90, 80));
-
-            // Border
-            spriteBatch.Draw(pixel, new Rectangle(rect.X, rect.Y, rect.Width, 1), new Color(100, 30, 25));
-            spriteBatch.Draw(pixel, new Rectangle(rect.X, rect.Bottom - 1, rect.Width, 1), new Color(60, 20, 15));
-
-            // X icon
             if (_font != null)
             {
                 string text = "X";
                 float scale = 0.5f;
                 Vector2 size = _font.MeasureString(text) * scale;
                 Vector2 pos = new(rect.X + (rect.Width - size.X) / 2, rect.Y + (rect.Height - size.Y) / 2);
-
                 spriteBatch.DrawString(_font, text, pos + Vector2.One, Color.Black * 0.5f,
                                        0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-                spriteBatch.DrawString(_font, text, pos, Color.White,
+                spriteBatch.DrawString(_font, text, pos, new Color(220, 90, 70),
                                        0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
             }
         }
@@ -2526,6 +2811,28 @@ namespace Client.Main.Controls.UI.Game.Inventory
                 spriteBatch.DrawString(_font, text, pos, hovered ? Theme.AccentBright : Theme.Accent,
                                        0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
             }
+        }
+
+        // Dimensões EFETIVAS do item na grade (só VISUAL — drag/equip continuam com as dims
+        // reais): dims do item.bmd (S21) podem divergir do servidor (S6) que posicionou os
+        // itens; sem clamp o retângulo invade o vizinho/moldura ("itens vazando").
+        private (int W, int H) EffectiveGridDims(InventoryItem item)
+        {
+            int x = item.GridPosition.X, y = item.GridPosition.Y;
+            int defW = Math.Max(1, item.Definition?.Width ?? 1);
+            int defH = Math.Max(1, item.Definition?.Height ?? 1);
+            int w = Math.Min(defW, Columns - x);
+            int h = Math.Min(defH, Rows - y);
+
+            foreach (var other in _items)
+            {
+                if (ReferenceEquals(other, item)) continue;
+                int ox = other.GridPosition.X, oy = other.GridPosition.Y;
+                if (oy >= y && oy < y + defH && ox > x) w = Math.Min(w, ox - x);
+                if (ox >= x && ox < x + defW && oy > y) h = Math.Min(h, oy - y);
+            }
+
+            return (Math.Max(1, w), Math.Max(1, h));
         }
 
         private void DrawTooltip(SpriteBatch spriteBatch)
@@ -2590,11 +2897,12 @@ namespace Client.Main.Controls.UI.Game.Inventory
             else
             {
                 Point gridTopLeft = Translate(_gridRect).Location;
+                var (hovW, hovH) = EffectiveGridDims(_hoveredItem);
                 hoveredItemRect = new Rectangle(
                     gridTopLeft.X + _hoveredItem.GridPosition.X * INVENTORY_SQUARE_WIDTH,
                     gridTopLeft.Y + _hoveredItem.GridPosition.Y * INVENTORY_SQUARE_HEIGHT,
-                    _hoveredItem.Definition.Width * INVENTORY_SQUARE_WIDTH,
-                    _hoveredItem.Definition.Height * INVENTORY_SQUARE_HEIGHT);
+                    hovW * INVENTORY_SQUARE_WIDTH,
+                    hovH * INVENTORY_SQUARE_HEIGHT);
             }
 
             // Tooltip positioning
@@ -2634,29 +2942,31 @@ namespace Client.Main.Controls.UI.Game.Inventory
             // TOOLTIP BACKGROUND
             // ═══════════════════════════════════════════════════════════
 
-            // Drop shadow
-            var shadowRect = new Rectangle(tooltipRect.X + 4, tooltipRect.Y + 4, tooltipRect.Width, tooltipRect.Height);
-            spriteBatch.Draw(pixel, shadowRect, Color.Black * 0.5f);
+            // (sombra projetada REMOVIDA a pedido — só a arte)
 
-            // Main background
-            UiDrawHelper.DrawVerticalGradient(spriteBatch, tooltipRect, new Color(20, 24, 32, 252), new Color(12, 14, 18, 254));
-
-            // Border color based on item rarity
+            // Fundo = ARTE do usuário (tooltip.png → inv_tooltip.OZP), 9-slice de borda
+            // fina. Fallback: gradiente antigo com moldura procedural.
             bool isExcellent = _hoveredItem.Details.IsExcellent;
             bool isAncient = _hoveredItem.Details.IsAncient;
             bool isHighLevel = _hoveredItem.Details.Level >= 7;
-
             Color borderColor = isExcellent ? Theme.GlowExcellent :
                                 isAncient ? Theme.GlowAncient :
                                 isHighLevel ? Theme.Accent :
                                 Theme.TextWhite;
 
-            // Uniform border all around
-            const int borderThickness = 2;
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, tooltipRect.Width, borderThickness), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Bottom - borderThickness, tooltipRect.Width, borderThickness), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
-            spriteBatch.Draw(pixel, new Rectangle(tooltipRect.Right - borderThickness, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+            if (Tex(_texInvTooltip))
+            {
+                Draw9SliceRect(spriteBatch, _texInvTooltip, tooltipRect, 3);
+            }
+            else
+            {
+                UiDrawHelper.DrawVerticalGradient(spriteBatch, tooltipRect, new Color(20, 24, 32, 252), new Color(12, 14, 18, 254));
+                const int borderThickness = 2;
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, tooltipRect.Width, borderThickness), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Bottom - borderThickness, tooltipRect.Width, borderThickness), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.X, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+                spriteBatch.Draw(pixel, new Rectangle(tooltipRect.Right - borderThickness, tooltipRect.Y, borderThickness, tooltipRect.Height), borderColor);
+            }
 
             // ═══════════════════════════════════════════════════════════
             // TOOLTIP TEXT

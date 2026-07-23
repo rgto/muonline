@@ -79,6 +79,14 @@ namespace Client.Main.Networking.PacketHandling.Handlers
                 var info = new ConnectionInfo(packet);
                 string ip = info.IpAddress;
                 ushort port = info.Port;
+                // Dev: MU_GS_HOST_OVERRIDE troca o host anunciado pelo connect server
+                // (útil no desktop quando o servidor anuncia 10.0.2.2 para o emulador).
+                string hostOverride = Environment.GetEnvironmentVariable("MU_GS_HOST_OVERRIDE");
+                if (!string.IsNullOrEmpty(hostOverride))
+                {
+                    _logger.LogInformation("Game server host override: {Old} -> {New}", ip, hostOverride);
+                    ip = hostOverride;
+                }
                 _logger.LogInformation("Game server address: {IP}:{Port}", ip, port);
                 _networkManager.SwitchToGameServer(ip, port);
             }

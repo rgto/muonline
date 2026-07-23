@@ -1,4 +1,4 @@
-﻿using Client.Data.BMD;
+﻿using Client.Data.Model;
 using Client.Main.Graphics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xna.Framework;
@@ -20,9 +20,8 @@ namespace Client.Main.Content
     {
         public static BMDLoader Instance { get; } = new BMDLoader();
 
-        private readonly BMDReader _reader = new();
-        private readonly Dictionary<string, Task<BMD>> _bmds = [];
-        private readonly Dictionary<BMD, Dictionary<string, string>> _texturePathMap = [];
+        private readonly Dictionary<string, Task<ModelAsset>> _bmds = [];
+        private readonly Dictionary<ModelAsset, Dictionary<string, string>> _texturePathMap = [];
         private Dictionary<string, Dictionary<int, string>> _blendingConfig;
 
         private readonly struct MeshCacheKey : IEquatable<MeshCacheKey>
@@ -43,7 +42,8 @@ namespace Client.Main.Content
             public override int GetHashCode() => HashCode.Combine(AssetId, MeshIndex);
         }
 
-        private const bool DisableGlobalMeshCache = false;
+        private static readonly bool DisableGlobalMeshCache =
+            Environment.GetEnvironmentVariable("MU_DISABLE_MESH_CACHE") == "1";
         // Enhanced cache state for GetModelBuffers to avoid redundant calculations
         private readonly Dictionary<MeshCacheKey, BufferCacheEntry> _bufferCacheState = [];
         // Per-mesh optimization: track which bones influence a mesh
@@ -196,6 +196,26 @@ namespace Client.Main.Content
             FrameCacheMisses = 0;
         }
 
+        // XNA Matrix and System.Numerics.Matrix4x4 are layout-identical; ModelSkinning
+        // works in System.Numerics (so Client.Data stays MonoGame-free), and the loader
+        // converts the palette once per mesh here.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3 ToXna(in System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static System.Numerics.Matrix4x4 ToNumerics(in Matrix m) => new(
+            m.M11, m.M12, m.M13, m.M14,
+            m.M21, m.M22, m.M23, m.M24,
+            m.M31, m.M32, m.M33, m.M34,
+            m.M41, m.M42, m.M43, m.M44);
+
+        private static System.Numerics.Matrix4x4[] ToNumericsPalette(Matrix[] boneMatrix)
+        {
+            var pal = new System.Numerics.Matrix4x4[boneMatrix.Length];
+            for (int i = 0; i < boneMatrix.Length; i++) pal[i] = ToNumerics(in boneMatrix[i]);
+            return pal;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector3 FastTransformPosition(in Matrix m, in System.Numerics.Vector3 p)
         {
@@ -217,7 +237,7 @@ namespace Client.Main.Content
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool TryResolveNormalBoneIndex(BMDTextureMesh mesh, int normalIndex, out int boneIndex)
+        private static bool TryResolveNormalBoneIndex(Client.Data.Model.ModelMesh mesh, int normalIndex, out int boneIndex)
         {
             boneIndex = 0;
             if (mesh == null || mesh.Normals == null || mesh.Vertices == null ||
@@ -247,15 +267,20 @@ namespace Client.Main.Content
             return false;
         }
 
-        public Task<BMD> Prepare(string path, string textureFolder = null)
+        public Task<ModelAsset> Prepare(string path, string textureFolder = null)
         {
             lock (_bmds)
             {
                 // Use original path as cache key for embedded resources
                 string cacheKey = path;
 
+                // Migration: callers still request ".bmd". Prefer the new ".glb" if it
+                // exists, falling back to the original path otherwise. This lets the
+                // 350+ callers keep their literal "Monster/NN.bmd" strings unchanged.
+                path = ResolveModelPath(path);
+
                 path = GetActualPath(Path.Combine(Constants.DataPath, path));
-                if (_bmds.TryGetValue(path, out Task<BMD> modelTask))
+                if (_bmds.TryGetValue(path, out Task<ModelAsset> modelTask))
                     return modelTask;
 
                 modelTask = LoadAssetAsync(path, textureFolder);
@@ -264,12 +289,27 @@ namespace Client.Main.Content
             }
         }
 
+        /// <summary>
+        /// Map a requested model path to the glTF asset. Callers pass legacy ".bmd"
+        /// paths; if a sibling ".glb" exists under DataPath we use it, otherwise we
+        /// keep the original (so un-converted assets still load during migration).
+        /// </summary>
+        private static string ResolveModelPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            if (path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase)) return path;
+
+            string glbRel = Path.ChangeExtension(path, ".glb");
+            string glbAbs = GetActualPath(Path.Combine(Constants.DataPath, glbRel));
+            return File.Exists(glbAbs) ? glbRel : path;
+        }
+
         public Task<bool> AssestExist(string path)
         {
             string finalPath = Path.Combine(Constants.DataPath, path);
             return Task.FromResult(File.Exists(finalPath));
         }
-        private async Task<BMD> LoadAssetAsync(string path, string textureFolder = null)
+        private async Task<ModelAsset> LoadAssetAsync(string path, string textureFolder = null)
         {
             try
             {
@@ -281,7 +321,74 @@ namespace Client.Main.Content
                     return null;
                 }
 
-                var asset = await _reader.Load(path);
+                // Load is CPU-bound; run off-thread to preserve the async contract.
+                // .glb  -> new glTF pipeline (smooth skinning).
+                // .bmd  -> legacy bridge (rigid), for assets not yet converted.
+                bool isGlb = path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase);
+                ModelAsset asset;
+                if (isGlb)
+                {
+                    // SAFETY FALLBACK: a malformed/corrupt .glb (some exports emit an empty-array
+                    // node that SharpGLTF rejects) must NOT make the monster invisible. Since the
+                    // path was already redirected .bmd->.glb, a throw here would return null and the
+                    // object would render nothing. Instead, fall back to the sibling .bmd (the
+                    // original rigid model) so the monster still shows up while we fix the export.
+                    try
+                    {
+                        asset = await Task.Run(() => GltfLoader.Load(path));
+                    }
+                    catch (Exception glbEx)
+                    {
+                        string bmdPath = Path.ChangeExtension(path, ".bmd");
+                        if (File.Exists(bmdPath))
+                        {
+                            _logger?.LogWarning("glTF load failed for {Path} ({Msg}); falling back to sibling .bmd", path, glbEx.Message);
+                            Console.WriteLine($"[GLBFALLBACK] {Path.GetFileName(path)} failed to load ({glbEx.Message}); using .bmd");
+                            path = bmdPath;
+                            asset = await Task.Run(() => BmdToModelAsset.Load(bmdPath));
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[GLBFALLBACK] {Path.GetFileName(path)} failed to load and no sibling .bmd exists: {glbEx.Message}");
+                            throw;
+                        }
+                    }
+                }
+                else
+                {
+                    asset = await Task.Run(() => BmdToModelAsset.Load(path));
+                }
+
+                // [MODELDIAG] Temporary diagnostic: for glb monsters, dump the rest-pose skinned
+                // bounds AS THE CLIENT COMPUTES THEM, so we can see in logcat whether a model that
+                // the offline validator calls clean is actually exploding at runtime. Remove once
+                // the Lost Tower / Elbeland deformation is diagnosed.
+                if (isGlb && asset != null && Constants.MODEL_DIAG && path.Contains("Monster"))
+                {
+                    try
+                    {
+                        var pal = Client.Data.Model.ModelSkinning.BuildSkinPalette(asset, 0, 0);
+                        var mn = new System.Numerics.Vector3(float.MaxValue);
+                        var mx = new System.Numerics.Vector3(float.MinValue);
+                        int nanCount = 0, vtot = 0;
+                        foreach (var mm in asset.Meshes)
+                        {
+                            if (mm.Vertices == null) continue;
+                            foreach (var vv in mm.Vertices)
+                            {
+                                var sp = Client.Data.Model.ModelSkinning.SkinPosition(vv, pal);
+                                if (float.IsNaN(sp.X) || float.IsNaN(sp.Y) || float.IsNaN(sp.Z)) { nanCount++; continue; }
+                                mn = System.Numerics.Vector3.Min(mn, sp);
+                                mx = System.Numerics.Vector3.Max(mx, sp);
+                                vtot++;
+                            }
+                        }
+                        var sz = mx - mn;
+                        var rx = asset.RootTransform;
+                        Console.WriteLine($"[MODELDIAG] {System.IO.Path.GetFileName(path)} bones={asset.Bones.Length} verts={vtot} nan={nanCount} restDiag={sz.Length():F1} size=({sz.X:F1},{sz.Y:F1},{sz.Z:F1}) rootScale=({rx.M11:F2},{rx.M22:F2},{rx.M33:F2})");
+                    }
+                    catch (Exception dex) { Console.WriteLine($"[MODELDIAG] {System.IO.Path.GetFileName(path)} FAILED: {dex.Message}"); }
+                }
 
                 // for custom blending from json
                 var relativePath = Path.GetRelativePath(Constants.DataPath, path).Replace("\\", "/");
@@ -309,6 +416,20 @@ namespace Client.Main.Content
                 var tasks = new List<Task>();
                 foreach (var mesh in asset.Meshes)
                 {
+                    if (string.IsNullOrEmpty(mesh.TexturePath))
+                        continue;
+
+                    // glTF/.glb meshes carry their texture EMBEDDED in the file. Register
+                    // those bytes with the loader (decoded lazily) and map the key to
+                    // itself — no disk lookup, since there is no loose OZJ/OZT on disk.
+                    if (mesh.EmbeddedTextureData != null && mesh.EmbeddedTextureData.Length > 0)
+                    {
+                        TextureLoader.Instance.RegisterEmbeddedTexture(mesh.TexturePath, mesh.EmbeddedTextureData);
+                        texturePathMap.TryAdd(mesh.TexturePath.ToLowerInvariant(), mesh.TexturePath);
+                        continue;
+                    }
+
+                    // Legacy BMD path: texture is a loose file on disk.
                     var fullPath = Path.Combine(dir, mesh.TexturePath);
                     if (
                         mesh.TexturePath == "unicon.jpg"
@@ -337,7 +458,7 @@ namespace Client.Main.Content
         /// Uses ArrayPool to eliminate per‑frame allocations and intelligent caching.
         /// </summary>
         public void GetModelBuffers(
-         BMD asset,
+         ModelAsset asset,
          int meshIndex,
          Color color,
          Matrix[] boneMatrix,
@@ -362,6 +483,9 @@ namespace Client.Main.Content
             var mesh = asset.Meshes[meshIndex];
             int assetId = RuntimeHelpers.GetHashCode(asset);
             var cacheKey = new MeshCacheKey(assetId, meshIndex);
+
+            if (Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1" && meshIndex == 0)
+                Console.WriteLine($"[BUF-ENTRY] {asset.Name} gltf={asset.IsGltf} m0 skipCache={skipCache}");
 
             // Use cached vertex count where possible to avoid per-frame summing
             if (!_meshVertexCountCache.TryGetValue(cacheKey, out int totalVertices))
@@ -413,6 +537,9 @@ namespace Client.Main.Content
                                    cacheEntry.LastBoneMatrixHash == boneMatrixHash &&
                                    vertexBuffer != null &&
                                    indexBuffer != null;
+
+                if (Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1" && asset.IsGltf && meshIndex == 0)
+                    Console.WriteLine($"[BUFDIAG-IN] {asset.Name} m0 hash={boneMatrixHash} hit={canUseCache} vb={(vertexBuffer != null)} usedBones={_meshUsedBones[cacheKey].Length}");
 
                 if (canUseCache)
                 {
@@ -495,40 +622,55 @@ namespace Client.Main.Content
                 int v = 0;
                 int uniqueTransformed = 0;
 
+                // Convert the XNA palette to System.Numerics once (ModelSkinning is
+                // MonoGame-free). Reused by every skinning site below.
+                var skinPalette = ToNumericsPalette(boneMatrix);
+
                 if (useParallelTransform)
                 {
                     var meshVertices = mesh.Vertices;
-                    var meshNormals = mesh.Normals;
-                    int boneCount = boneMatrix.Length;
 
                     Parallel.For(0, meshVertices.Length, CpuSkinningParallelOptions, vi =>
                     {
+                        // Weighted (smooth) skinning: blend up to 4 bone influences.
                         var vert = meshVertices[vi];
-                        if (vert.Node >= 0 && vert.Node < boneCount)
-                        {
-                            posCache[vi] = FastTransformPosition(in boneMatrix[vert.Node], in vert.Position);
-                        }
-                        else
-                        {
-                            posCache[vi] = vert.Position;
-                        }
-                    });
-
-                    Parallel.For(0, meshNormals.Length, CpuSkinningParallelOptions, ni =>
-                    {
-                        var srcNormal = meshNormals[ni];
-                        if (TryResolveNormalBoneIndex(mesh, ni, out int normalBoneIndex) &&
-                            (uint)normalBoneIndex < (uint)boneCount)
-                        {
-                            normalCache[ni] = FastTransformNormal(in boneMatrix[normalBoneIndex], in srcNormal.Normal);
-                        }
-                        else
-                        {
-                            normalCache[ni] = srcNormal.Normal;
-                        }
+                        posCache[vi] = ToXna(ModelSkinning.SkinPosition(in vert, skinPalette));
+                        // Normal shares the vertex's influences in the unified layout.
+                        normalCache[vi] = ToXna(ModelSkinning.SkinNormal(in vert, skinPalette));
                     });
 
                     uniqueTransformed = meshVertices.Length;
+                }
+
+                // Diag dev-only (MU_BUF_DIAG=1): bbox dos vértices REALMENTE enviados
+                // à GPU por este rebuild (compara caminhos DLS on/off).
+                if (Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1")
+                {
+                    var bmn = new Vector3(float.MaxValue); var bmx = new Vector3(float.MinValue);
+                    if (useParallelTransform)
+                    {
+                        for (int vi = 0; vi < mesh.Vertices.Length; vi++)
+                        { bmn = Vector3.Min(bmn, posCache[vi]); bmx = Vector3.Max(bmx, posCache[vi]); }
+                    }
+                    else
+                    {
+                        foreach (var vert in mesh.Vertices)
+                        {
+                            var pp = ToXna(ModelSkinning.SkinPosition(in vert, skinPalette));
+                            bmn = Vector3.Min(bmn, pp); bmx = Vector3.Max(bmx, pp);
+                        }
+                    }
+                    var bs = bmx - bmn;
+                    string boneInfo = "";
+                    if (_meshUsedBones.TryGetValue(cacheKey, out var ub) && ub.Length == 1 && ub[0] < skinPalette.Length)
+                    {
+                        var pm = skinPalette[ub[0]];
+                        float sc = new System.Numerics.Vector3(pm.M11, pm.M12, pm.M13).Length();
+                        boneInfo = $" bone={ub[0]} palScale={sc:F2} palT=({pm.M41:F0},{pm.M42:F0},{pm.M43:F0})";
+                        var rv = mesh.Vertices.Length > 0 ? mesh.Vertices[0].Position : default;
+                        boneInfo += $" v0=({rv.X:F1},{rv.Y:F1},{rv.Z:F1})";
+                    }
+                    Console.WriteLine($"[BUFDIAG] {asset.Name} m{meshIndex} size=({bs.X:F0},{bs.Y:F0},{bs.Z:F0}) zmin={bmn.Z:F0} dls={Constants.ENABLE_DYNAMIC_LIGHTING_SHADER}{boneInfo}");
                 }
 
                 if (useParallelAssembly)
@@ -579,14 +721,12 @@ namespace Client.Main.Content
                                 visited[vi] = true;
                                 uniqueTransformed++;
                                 var vert = mesh.Vertices[vi];
-                                if (vert.Node >= 0 && vert.Node < boneMatrix.Length)
-                                {
-                                    posCache[vi] = FastTransformPosition(in boneMatrix[vert.Node], in vert.Position);
-                                }
-                                else
-                                {
-                                    posCache[vi] = vert.Position;
-                                }
+
+                                // Weighted (smooth) skinning of position + normal. In the
+                                // unified layout the normal shares the vertex's influences,
+                                // so normal index == vertex index (ni == vi).
+                                posCache[vi] = ToXna(ModelSkinning.SkinPosition(in vert, skinPalette));
+                                normalCache[vi] = ToXna(ModelSkinning.SkinNormal(in vert, skinPalette));
 
                                 if (vertexDeformer != null)
                                 {
@@ -594,23 +734,7 @@ namespace Client.Main.Content
                                 }
                             }
 
-                            int ni = tri.NormalIndex[j];
-                            if (!useParallelTransform && !normalVisited[ni])
-                            {
-                                normalVisited[ni] = true;
-                                var srcNormal = mesh.Normals[ni];
-                                if (TryResolveNormalBoneIndex(mesh, ni, out int normalBoneIndex) &&
-                                    (uint)normalBoneIndex < (uint)boneMatrix.Length)
-                                {
-                                    normalCache[ni] = FastTransformNormal(in boneMatrix[normalBoneIndex], in srcNormal.Normal);
-                                }
-                                else
-                                {
-                                    normalCache[ni] = srcNormal.Normal;
-                                }
-                            }
-
-                            var normal = normalCache[ni];
+                            var normal = normalCache[vi];
 
                             int ti = tri.TexCoordIndex[j];
                             var uv = mesh.TexCoords[ti];
@@ -714,7 +838,7 @@ namespace Client.Main.Content
         /// Buffers store bind-pose positions and per-vertex bone index.
         /// </summary>
         public bool TryGetGpuSkinnedMeshBuffers(
-            BMD asset,
+            ModelAsset asset,
             int meshIndex,
             out VertexBuffer vertexBuffer,
             out IndexBuffer indexBuffer,
@@ -762,6 +886,8 @@ namespace Client.Main.Content
 
             try
             {
+              try
+              {
                 int maxBoneIndex = 0;
                 int v = 0;
 
@@ -859,6 +985,16 @@ namespace Client.Main.Content
                 indexBuffer = newIB;
                 boneCount = maxBoneIndex + 1;
                 return true;
+              }
+              catch (Exception ex)
+              {
+                // GPU skin buffer build failed for this mesh — log and fall back to CPU
+                // skinning (return false) instead of taking down the process. Guards models
+                // with unusual structure (e.g. FBX2glTF multi-skin monsters).
+                System.Console.WriteLine($"[GPUSKIN] build failed asset={asset.Name} mesh={meshIndex} verts={totalVertices} bones={asset.Bones?.Length}: {ex.GetType().Name} {ex.Message}");
+                vertexBuffer = null; indexBuffer = null; boneCount = 0;
+                return false;
+              }
             }
             finally
             {
@@ -890,7 +1026,7 @@ namespace Client.Main.Content
             return hash;
         }
 
-        public string GetTexturePath(BMD bmd, string texturePath)
+        public string GetTexturePath(ModelAsset bmd, string texturePath)
         {
             texturePath = texturePath.ToLowerInvariant();
 

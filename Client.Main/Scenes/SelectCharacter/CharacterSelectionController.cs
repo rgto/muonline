@@ -1,10 +1,12 @@
-using Client.Main.Controls;
+﻿using Client.Main.Controls;
 using Client.Main.Controls.UI;
+using Client.Main.Controls.UI.SelectCharacter;
 using Client.Main.Controllers;
 using Client.Main.Core.Utilities;
 using Client.Main.Models;
 using Client.Main.Objects;
 using Client.Main.Objects.Player;
+using Client.Main.Worlds;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xna.Framework;
 using MUnique.OpenMU.Network.Packets;
@@ -20,7 +22,7 @@ namespace Client.Main.Scenes.SelectCharacter
         // === Private state ===
         private readonly List<PlayerObject> _characters = new();
         private readonly List<(string Name, CharacterClassNumber Class, ushort Level, byte[] Appearance)> _characterInfos = new();
-        private readonly Dictionary<PlayerObject, LabelControl> _labels = new();
+        private readonly Dictionary<PlayerObject, LoginRoleLabelControl> _labels = new();
         private readonly ILogger<CharacterSelectionController> _logger;
         private int _activeIndex = -1;
 
@@ -34,7 +36,7 @@ namespace Client.Main.Scenes.SelectCharacter
 
         // === Public data (read-only) ===
         public IReadOnlyList<PlayerObject> Characters => _characters;
-        public IReadOnlyDictionary<PlayerObject, LabelControl> Labels => _labels;
+        public IReadOnlyDictionary<PlayerObject, LoginRoleLabelControl> Labels => _labels;
 
         // === State ===
         public int ActiveIndex => _activeIndex;
@@ -46,6 +48,8 @@ namespace Client.Main.Scenes.SelectCharacter
         // === Events ===
         public event EventHandler<string> CharacterClicked;
         public event EventHandler<string> CharacterDoubleClicked;
+        /// <summary>Del do rótulo do personagem selecionado (btn_Delete do prefab).</summary>
+        public event EventHandler<string> CharacterDeleteClicked;
 
         // === Constructor ===
         public CharacterSelectionController(ILogger<CharacterSelectionController> logger)
@@ -62,6 +66,7 @@ namespace Client.Main.Scenes.SelectCharacter
             Vector3 displayAngle)
         {
             _logger.LogInformation("Creating {Count} character objects...", characterInfos.Count);
+            System.Console.WriteLine($"[DCPROBE] CreateCharacters START count={characterInfos.Count}");
 
             // Dispose old objects
             DisposeCharacters(world, scene);
@@ -76,49 +81,53 @@ namespace Client.Main.Scenes.SelectCharacter
                 return;
             }
 
-            var loading = new List<Task>(characterInfos.Count);
+            // UM personagem por vez, no PILAR. TODOS carregam AGORA, em sequência (não
+            // Task.WhenAll, pra não pico no main thread). Carregar sob demanda no clique
+            // NÃO funciona: um char criado Hidden nunca entra no grid espacial de render,
+            // e mostrá-lo depois (Hidden=false) não o traz pro _visibleObjects — só o 1º
+            // aparecia. O "Connection lost" que motivou o lazy-load era outra causa (pacote
+            // CharacterList truncado no header C1, já corrigido no servidor via C2).
+            var selectWorld = world as SelectWorld;
 
-            foreach (var (name, cls, lvl, appearanceBytes) in characterInfos)
+            for (int i = 0; i < characterInfos.Count; i++)
             {
+                var (name, cls, lvl, appearanceBytes) = characterInfos[i];
                 var player = new PlayerObject(new AppearanceData(appearanceBytes))
                 {
                     Name = name,
                     CharacterClass = cls,
                     Position = displayPosition,
                     Angle = displayAngle,
-                    Interactive = false,
+                    Interactive = true,
                     World = world,
                     CurrentAction = PlayerAction.PlayerStopMale,
-                    Hidden = true,
+                    Hidden = i != 0,          // só o primeiro aparece; os outros carregam visíveis-capazes
                 };
 
                 player.Click += OnPlayerClick;
 
                 _characters.Add(player);
                 world.Objects.Add(player);
-                loading.Add(player.Load());
 
-                var label = new LabelControl
+                // Carrega TODOS agora (o modelo precisa estar carregado E ter passado pelo
+                // build do _visibleObjects pra renderizar quando o slot for escolhido).
+                await player.Load();
+
+                var label = new LoginRoleLabelControl
                 {
-                    Text = $"Lv.{lvl}  {name}",
-                    FontSize = 14,
-                    TextColor = Color.White,
-                    HasShadow = true,
-                    ShadowColor = Color.Black * 0.8f,
-                    ShadowOffset = new Vector2(1, 1),
-                    UseManualPosition = true,
+                    CharacterName = name,
+                    CharacterClass = cls,
+                    Level = lvl,
                     Visible = false
                 };
-
                 _labels.Add(player, label);
                 scene.Controls.Add(label);
                 label.BringToFront();
             }
 
-            await Task.WhenAll(loading);
-
             // Note: Cursor.BringToFront() is handled by the scene after creation
 
+            System.Console.WriteLine("[DCPROBE] CreateCharacters DONE");
             _logger.LogInformation("Finished creating and loading character objects and labels.");
 
             if (_characters.Count > 0)
@@ -171,29 +180,48 @@ namespace Client.Main.Scenes.SelectCharacter
                 world.Objects.Add(player);
                 await player.Load(appearanceConfig.PlayerClass);
                 await player.UpdateEquipmentAppearanceFromConfig(appearanceConfig);
+                DumpSelectDiag(player);
 
-                var label = new LabelControl
+                var label = new LoginRoleLabelControl
                 {
-                    Text = $"Lv.{lvl}  {name}",
-                    FontSize = 14,
-                    TextColor = Color.White,
-                    HasShadow = true,
-                    ShadowColor = Color.Black * 0.8f,
-                    ShadowOffset = new Vector2(1, 1),
-                    UseManualPosition = true,
+                    CharacterName = name,
+                    CharacterClass = (CharacterClassNumber)cls,
+                    Level = lvl,
                     Visible = false
                 };
 
                 _labels.Add(player, label);
                 scene.Controls.Add(label);
+                await label.Load();
                 label.BringToFront();
             }
 
+            System.Console.WriteLine("[DCPROBE] CreateCharacters DONE");
             _logger.LogInformation("Finished creating and loading character objects and labels.");
 
             if (_characters.Count > 0)
             {
                 SetActiveCharacter(0);
+            }
+        }
+
+        /// <summary>Diag dev-only (MU_SELECT_DIAG=1): lista as peças do char na seleção —
+        /// caça de cabeça/arma duplicada.</summary>
+        private void DumpSelectDiag(PlayerObject pl)
+        {
+            if (Environment.GetEnvironmentVariable("MU_SELECT_DIAG") != "1")
+                return;
+            var parts = new (string Tag, ModelObject Obj)[]
+            {
+                ("HelmMask", pl.HelmMask), ("Helm", pl.Helm), ("Armor", pl.Armor),
+                ("Pants", pl.Pants), ("Gloves", pl.Gloves), ("Boots", pl.Boots),
+                ("Weapon1", pl.Weapon1), ("Weapon2", pl.Weapon2), ("Wings", pl.EquippedWings),
+            };
+            Console.WriteLine($"[SELDIAG] === {pl.Name} class={pl.CharacterClass} ===");
+            foreach (var (tag, o) in parts)
+            {
+                if (o == null) { Console.WriteLine($"[SELDIAG] {tag}: null"); continue; }
+                Console.WriteLine($"[SELDIAG] {tag}: model={o.Model?.Name ?? "-"} hidden={o.Hidden} link={o.LinkParentAnimation} boneLink={o.ParentBoneLink} item={o.ItemDefinition?.Name ?? "-"} type={o.Type}");
             }
         }
 
@@ -217,17 +245,14 @@ namespace Client.Main.Scenes.SelectCharacter
                 return;
             }
 
+            // Todos ficam visíveis e clicáveis (fileira do mobile); só o Del do rótulo
+            // migra pro selecionado. Esconder os outros era a divergência principal.
             for (int i = 0; i < _characters.Count; i++)
             {
                 var player = _characters[i];
-                bool isActive = i == index;
-
-                player.Hidden = !isActive;
-                player.Interactive = isActive;
-
                 if (_labels.TryGetValue(player, out var label))
                 {
-                    label.Visible = isActive;
+                    label.IsSelected = i == index;
                 }
             }
 
@@ -289,20 +314,27 @@ namespace Client.Main.Scenes.SelectCharacter
             if (clickedPlayer == null)
                 return;
 
-            if (_activeIndex < 0 || _characters[_activeIndex] != clickedPlayer)
-            {
-                _logger.LogDebug("Ignoring click on inactive character '{Name}'.", clickedPlayer.Name);
+            // O Del fica SOBRE o personagem selecionado; sem isso, apagar viraria
+            // "entrar no jogo" no duplo clique.
+            if (_labels.TryGetValue(clickedPlayer, out var lbl) &&
+                lbl.HitsDelete(MuGame.Instance.UiMouseState.Position))
                 return;
-            }
 
-            // Check for double-click
+            // Fiel à Lua (ClickDown): clicar em QUALQUER personagem da fileira o
+            // seleciona. Só o duplo clique no JÁ selecionado entra no jogo.
+            bool wasActive = _activeIndex >= 0 && _characters[_activeIndex] == clickedPlayer;
+
             DateTime now = DateTime.UtcNow;
             double timeSinceLastClick = (now - _lastClickTime).TotalMilliseconds;
-            bool isDoubleClick = timeSinceLastClick < DoubleClickThresholdMs &&
+            bool isDoubleClick = wasActive &&
+                                timeSinceLastClick < DoubleClickThresholdMs &&
                                 _lastClickedCharacter == clickedPlayer.Name;
 
             _lastClickTime = now;
             _lastClickedCharacter = clickedPlayer.Name;
+
+            if (!wasActive)
+                SetActiveCharacter(_characters.IndexOf(clickedPlayer));
 
             if (isDoubleClick)
             {
@@ -333,6 +365,30 @@ namespace Client.Main.Scenes.SelectCharacter
                 label.Dispose();
             }
             _labels.Clear();
+        }
+
+        /// <summary>
+        /// Mostra SÓ o personagem deste nome no pilar e esconde os outros — é o que a lista
+        /// de slots chama quando se clica num slot. Todos já estão carregados na mesma
+        /// posição, então trocar é só ligar/desligar o Hidden (sem engasgo de load).
+        /// </summary>
+        public void ShowOnly(string? name)
+        {
+            PlayerObject? shown = null;
+            foreach (var player in _characters)
+            {
+                bool isThis = string.Equals(player.Name, name, StringComparison.OrdinalIgnoreCase);
+                player.Hidden = !isThis;
+                if (isThis) shown = player;
+            }
+
+            // O toggle de Hidden força o rebuild da lista de visíveis (Object_HiddenChanged),
+            // mas garantimos aqui também: objeto criado Hidden precisa reentrar no render.
+            if (shown != null)
+                (shown.World as WorldControl)?.InvalidateVisibleObjects();
+
+            foreach (var (player, label) in _labels)
+                label.Visible = false;   // quem mostra nome/classe/nível agora é a lista
         }
 
         public void Dispose()

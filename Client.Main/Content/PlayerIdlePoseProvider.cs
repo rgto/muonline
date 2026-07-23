@@ -1,7 +1,7 @@
 // File: Client.Main/Content/PlayerIdlePoseProvider.cs
 using System;
 using System.Threading.Tasks;
-using Client.Data.BMD;
+using Client.Data.Model;
 using Microsoft.Xna.Framework;
 
 namespace Client.Main.Content
@@ -70,7 +70,7 @@ namespace Client.Main.Content
         /// <summary>
         /// Builds bone matrices for a specific animation frame.
         /// </summary>
-        private static Matrix[] BuildIdlePoseBoneMatrices(BMD bmd, int actionIndex, int frame)
+        private static Matrix[] BuildIdlePoseBoneMatrices(ModelAsset bmd, int actionIndex, int frame)
         {
             if (bmd?.Bones == null || bmd.Bones.Length == 0)
                 return Array.Empty<Matrix>();
@@ -79,7 +79,7 @@ namespace Client.Main.Content
             var result = new Matrix[bones.Length];
 
             // Get the action for animation data
-            BMDTextureAction action = null;
+            ModelAction action = null;
             if (bmd.Actions != null && actionIndex >= 0 && actionIndex < bmd.Actions.Length)
             {
                 action = bmd.Actions[actionIndex];
@@ -90,7 +90,7 @@ namespace Client.Main.Content
                 var bone = bones[i];
                 Matrix local = Matrix.Identity;
 
-                if (bone != null && bone != BMDTextureBone.Dummy)
+                if (bone != null && bone != ModelBone.Dummy)
                 {
                     // Try to get animation data from the action
                     if (action != null && bone.Matrixes != null && bone.Matrixes.Length > 0)

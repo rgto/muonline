@@ -230,18 +230,24 @@ namespace Client.Main.Scenes
                 {
                     UpdateProgress(p =>
                     {
-                        p.StatusText = "Assets found – skipping download.";
+                        p.StatusText = "Assets found – checking for updates…";
                         p.Progress = 1f;
                     });
-                    await Task.Delay(500, ct);
+                    await Task.Delay(200, ct);
                 }
                 else
                 {
                     await DownloadAndExtractAssetsAsync(localZip, extractPath, ct);
                 }
 
+                // Patch incremental (estilo launcher do MU): compara o manifesto do servidor
+                // com os arquivos locais e baixa SÓ o que mudou/falta. Roda sempre — inclusive
+                // quando os assets já existem — pra trazer arte/dados novos sem re-baixar tudo.
+                await ApplyIncrementalPatchAsync(extractPath, ct);
+
                 await GateDataManager.Instance.LoadData();
                 await SkillDatabase.Initialize();
+                await CharacterCreateDatabase.Initialize();
 
                 await TransitionToNextSceneAsync(ct);
             }
@@ -260,8 +266,25 @@ namespace Client.Main.Scenes
 
         private async Task DownloadAndExtractAssetsAsync(string localZip, string extractPath, CancellationToken ct)
         {
-            string[] urls = { 
-            //    _dataPathUrl, 
+            // Se já existe um Data.zip local completo (ex.: empurrado via adb ou baixado
+            // numa sessão anterior), PULA o download e extrai direto. Evita re-baixar
+            // 2.4GB a cada iteração de UI/asset no dev.
+            if (TryUseExistingZip(localZip))
+            {
+                UpdateProgress(p =>
+                {
+                    p.StatusText = "Local Data.zip found – extracting...";
+                    p.IsDownloading = false;
+                    p.Progress = 0f;
+                });
+                await ExtractZipWithProgressAsync(localZip, extractPath, ct);
+                UpdateProgress(p => p.StatusText = "Cleaning up...");
+                SafeDeleteFile(localZip);
+                return;
+            }
+
+            string[] urls = {
+                _dataPathUrl,
                 Constants.DefaultDataPathUrl
             };
             Exception lastError = null;
@@ -319,6 +342,147 @@ namespace Client.Main.Scenes
 
             UpdateProgress(p => p.StatusText = "Cleaning up...");
             SafeDeleteFile(localZip);
+        }
+
+        // ── Patch incremental (estilo launcher oficial do MU) ───────────────────────
+        // Baixa patch/filelist.json (manifesto: path+md5+size por arquivo), compara com os
+        // arquivos locais e baixa SÓ os que faltam ou têm hash diferente, de patch/files/.
+        // Tolerante a falha: se não houver manifesto/servidor, apenas segue com o que existe.
+        private async Task ApplyIncrementalPatchAsync(string dataPath, CancellationToken ct)
+        {
+            try
+            {
+                UpdateProgress(p => { p.StatusText = "Checking for updates…"; p.IsDownloading = true; p.Progress = 0f; });
+
+                // Tenta cada host candidato (configurado / NAT do emulador / LAN) e usa o
+                // 1º que responder o manifesto. Necessário porque o LoadScene roda ANTES da
+                // tela de host, e o IP certo varia por ambiente (BlueStacks/emulador = 10.0.2.2).
+                string baseUrl = null, manifestJson = null;
+                foreach (var candidate in PatchBaseUrlCandidates())
+                {
+                    try
+                    {
+                        manifestJson = await DownloadClient.Value.GetStringAsync(candidate + "patch/filelist.json", ct);
+                        baseUrl = candidate;
+                        Debug.WriteLine($"[Patch] manifest from {candidate}");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Patch] {candidate} failed: {ex.Message}");
+                    }
+                }
+                if (baseUrl == null || manifestJson == null)
+                {
+                    Debug.WriteLine("[Patch] no reachable manifest – skipping incremental update.");
+                    return;
+                }
+
+                var manifest = System.Text.Json.JsonDocument.Parse(manifestJson);
+                if (!manifest.RootElement.TryGetProperty("files", out var files))
+                    return;
+
+                // Descobre o que precisa baixar (hash local != manifesto, ou ausente).
+                var toDownload = new List<(string Path, string Md5, long Size)>();
+                foreach (var entry in files.EnumerateArray())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string rel = entry.GetProperty("path").GetString();
+                    string md5 = entry.GetProperty("md5").GetString();
+                    long size = entry.TryGetProperty("size", out var s) ? s.GetInt64() : 0;
+                    if (string.IsNullOrEmpty(rel) || string.IsNullOrEmpty(md5))
+                        continue;
+
+                    string local = Path.Combine(dataPath, rel.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(local) || !string.Equals(Md5OfFile(local), md5, StringComparison.OrdinalIgnoreCase))
+                        toDownload.Add((rel, md5, size));
+                }
+
+                if (toDownload.Count == 0)
+                {
+                    UpdateProgress(p => { p.StatusText = "Up to date."; p.IsDownloading = false; p.Progress = 1f; });
+                    Debug.WriteLine("[Patch] up to date – nothing to download.");
+                    return;
+                }
+
+                Debug.WriteLine($"[Patch] {toDownload.Count} file(s) to update.");
+                int done = 0;
+                foreach (var (rel, md5, size) in toDownload)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string url = baseUrl + "patch/files/" + rel;
+                    string dst = Path.Combine(dataPath, rel.Replace('/', Path.DirectorySeparatorChar));
+                    EnsureDirectoryExists(Path.GetDirectoryName(dst));
+
+                    int idx = ++done;
+                    UpdateProgress(p =>
+                    {
+                        p.StatusText = $"Updating ({idx}/{toDownload.Count}) {Path.GetFileName(rel)}";
+                        p.IsDownloading = true;
+                        p.Progress = (float)idx / toDownload.Count;
+                    });
+
+                    try
+                    {
+                        await DownloadFileAsync(url, dst, ct);
+                        // valida o hash do que baixou; se não bater, remove (evita arquivo corrompido).
+                        if (!string.Equals(Md5OfFile(dst), md5, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Debug.WriteLine($"[Patch] hash mismatch for {rel} – discarding.");
+                            SafeDeleteFile(dst);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Patch] failed {rel}: {ex.Message}");
+                    }
+                }
+
+                UpdateProgress(p => { p.StatusText = "Update complete."; p.IsDownloading = false; p.Progress = 1f; });
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Patch] incremental patch error: {ex.Message}");
+            }
+        }
+
+        // Hosts candidatos pro servidor de assets (patch), em ordem de preferência. O IP
+        // certo varia: BlueStacks/emulador alcançam o host via NAT 10.0.2.2; máquina/LAN
+        // usam o IP configurado. Tenta todos; o 1º que responder o manifesto vence.
+        private IEnumerable<string> PatchBaseUrlCandidates()
+        {
+            var seen = new HashSet<string>();
+            string port = "8090";
+
+            // porta do DataPathUrl base, se houver
+            string dataUrl = _dataPathUrl;
+            if (!string.IsNullOrEmpty(dataUrl))
+            {
+                int slash = dataUrl.LastIndexOf('/');
+                string b = slash >= 0 ? dataUrl.Substring(0, slash + 1) : dataUrl + "/";
+                try { port = new Uri(b).Port.ToString(); } catch { }
+                if (seen.Add(b)) yield return b;
+            }
+
+            // NAT do emulador/BlueStacks (host = 10.0.2.2) — essencial pra esses ambientes.
+            string nat = $"http://10.0.2.2:{port}/";
+            if (seen.Add(nat)) yield return nat;
+
+            // host do game server configurado (quando já existe), na mesma porta de assets.
+            string cfgHost = MuGame.AppSettings?.ConnectServerHost;
+            if (!string.IsNullOrWhiteSpace(cfgHost))
+            {
+                string cfg = $"http://{cfgHost}:{port}/";
+                if (seen.Add(cfg)) yield return cfg;
+            }
+        }
+
+        private static string Md5OfFile(string path)
+        {
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            using var fs = File.OpenRead(path);
+            return Convert.ToHexString(md5.ComputeHash(fs)).ToLowerInvariant();
         }
 
         private async Task TransitionToNextSceneAsync(CancellationToken ct)
@@ -763,6 +927,25 @@ namespace Client.Main.Scenes
                     p.StatusText = "Extraction complete!";
                 });
             }, ct);
+        }
+
+        // Verifica se já existe um Data.zip local VÁLIDO (arquivo abrível com entradas),
+        // pra pular o download. Um download parcial não abre como ZipArchive -> retorna false.
+        private static bool TryUseExistingZip(string localZip)
+        {
+            try
+            {
+                if (!File.Exists(localZip))
+                    return false;
+                if (new FileInfo(localZip).Length < 1024)
+                    return false;
+                using var archive = ZipFile.OpenRead(localZip);
+                return archive.Entries.Count > 0;
+            }
+            catch
+            {
+                return false; // zip parcial/corrompido: cai no download normal
+            }
         }
 
         private static string NormalizeEntryPath(string entryFullName)

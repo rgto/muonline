@@ -166,6 +166,16 @@ namespace Client.Main.Objects
             if (Model?.Meshes != null && mesh < Model.Meshes.Length)
             {
                 var meshConf = Model.Meshes[mesh];
+
+                // glTF (DH/Immortal) meshes carry their texture EMBEDDED. Those assets are
+                // authored with unreliable / single-sided triangle winding, so with backface
+                // culling on, the far-facing half of a mesh vanishes (e.g. a spider showing
+                // only 3 of its 6 legs from many angles). BMD meshes had winding tuned for
+                // CullClockwise and must keep it; imported glTF meshes render two-sided so no
+                // geometry is culled away. Small fill-rate cost, correct silhouette.
+                if (meshConf.EmbeddedTextureData != null)
+                    return true;
+
                 return meshConf.BlendingMode != null && meshConf.BlendingMode != "Opaque";
             }
 
@@ -385,6 +395,13 @@ namespace Client.Main.Objects
             }
 
             _drawModelInvocationId = ++_drawModelInvocationCounter;
+
+            if (_drawDiagOnce == 0 && Model?.IsGltf == true &&
+                Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1")
+            {
+                _drawDiagOnce = 1;
+                Console.WriteLine($"[MODELDIAG] {Model.Name} dls={Constants.ENABLE_DYNAMIC_LIGHTING_SHADER} meshes={meshCount} cpuVB0={(_boneVertexBuffers != null && _boneVertexBuffers.Length > 0 && _boneVertexBuffers[0] != null)} gpuEnab0={(_gpuSkinMeshEnabled != null && _gpuSkinMeshEnabled.Length > 0 && _gpuSkinMeshEnabled[0])} special0={NeedsSpecialShaderForMesh(0)}");
+            }
 
             // Cache commonly used values
             var view = Camera.Instance.View;
@@ -653,6 +670,12 @@ namespace Client.Main.Objects
                                         _gpuSkinIndexBuffers[mesh] != null;
 
             var shaderSelection = DetermineShaderForMesh(mesh);
+
+            if (Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1" && Model?.IsGltf == true && mesh == 0 && _drawDiagOnce == 0)
+            {
+                _drawDiagOnce = 1;
+                Console.WriteLine($"[DRAWDIAG] {Model.Name} dls={Constants.ENABLE_DYNAMIC_LIGHTING_SHADER} dyn={shaderSelection.UseDynamicLighting} mm={shaderSelection.UseMonsterMaterial} im={shaderSelection.UseItemMaterial} cpuBuf={hasCpuBuffers} gpuBuf={hasGpuDynamicBuffers} gpuEnab={_gpuSkinMeshEnabled?[0]}");
+            }
 
             if (shaderSelection.UseDynamicLighting)
             {

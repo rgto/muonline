@@ -38,7 +38,12 @@ namespace Client.Main.Controls.UI.Game.Skills
             CommandTexturePath
         ];
 
-        private const int AtlasSize = 256;
+        /// <summary>
+        /// Reference atlas space the source rectangles are expressed in. The shipped OZJ
+        /// textures may be any square resolution (originals are 256, the oval remaster is
+        /// 4096) — always run the frame through <see cref="ScaleToTexture"/> before drawing.
+        /// </summary>
+        public const int AtlasSize = 256;
 
         private const int PetCommandDefaultSkillId = 120;
         private const int PetCommandLastSkillId = 123;
@@ -66,6 +71,35 @@ namespace Client.Main.Controls.UI.Game.Skills
 
         private const int RageFighterFirstSkillId = 260;
         private const int Skill2DefaultStartSkillId = 57;
+
+        /// <summary>
+        /// Rescale a 256-space source rectangle to the actual resolution of the loaded
+        /// texture (e.g. ×16 for the 4096² oval remaster). Exact integer math for any
+        /// power-of-two multiple of 256.
+        /// </summary>
+        public static Rectangle ScaleToTexture(Rectangle source, Microsoft.Xna.Framework.Graphics.Texture2D texture)
+        {
+            return new Rectangle(
+                source.X * texture.Width / AtlasSize,
+                source.Y * texture.Height / AtlasSize,
+                source.Width * texture.Width / AtlasSize,
+                source.Height * texture.Height / AtlasSize);
+        }
+
+        /// <summary>
+        /// The square sub-region of a 20×28 icon cell that holds the round icon of the oval
+        /// remaster: a circle of diameter <see cref="IconWidth"/>, vertically centered
+        /// (4px margin top/bottom in 256-space). Stretch this into a square destination to
+        /// fill a circular slot 100%.
+        /// </summary>
+        public static Rectangle CircleSource(Rectangle source)
+        {
+            return new Rectangle(
+                source.X,
+                source.Y + (IconHeight - IconWidth) / 2,
+                IconWidth,
+                IconWidth);
+        }
 
         public static bool TryResolve(ushort skillId, SkillBMD? definition, out SkillIconFrame frame)
         {
@@ -184,6 +218,17 @@ namespace Client.Main.Controls.UI.Game.Skills
             }
             else if (definition?.SkillUseType == (byte)SkillUseType.MasterActive)
             {
+                int magicIcon = definition.MagicIcon;
+                column = magicIcon % 12;
+                row = (magicIcon / 12) + 4;
+                texturePath = Skill2TexturePath;
+            }
+            else if (skill >= 300 && skill <= 550 && definition != null)
+            {
+                // MASTER SKILLS (árvore de mastery, passivas incluídas): o oficial resolve
+                // TODO ícone master pelo MagicIcon do skill.bmd (região das linhas 4+ do
+                // newui_skill2, grade de 12 colunas) — sem isso as passivas 300+ caíam
+                // na fórmula do RageFighter e saíam com ícone errado.
                 int magicIcon = definition.MagicIcon;
                 column = magicIcon % 12;
                 row = (magicIcon / 12) + 4;

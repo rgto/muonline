@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Threading.Tasks;
+using Client.Data.Model;
 using Client.Data.BMD;
 using Client.Main.Content;
 using Client.Main.Controls.UI.Common;
@@ -320,7 +321,8 @@ namespace Client.Main.Controls.UI.Game.Skills
                 drawW,
                 drawH);
 
-            spriteBatch.Draw(_iconTexture, iconRect, _iconSource, Color.White * Alpha);
+            // _iconSource is 256-space; rescale to the actual OZJ resolution (4K remaster).
+            spriteBatch.Draw(_iconTexture, iconRect, SkillIconAtlas.ScaleToTexture(_iconSource, _iconTexture), Color.White * Alpha);
         }
 
         private void DrawFooter(SpriteBatch spriteBatch, Texture2D pixel, Rectangle rect)

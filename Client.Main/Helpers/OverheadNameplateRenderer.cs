@@ -27,7 +27,7 @@ namespace Client.Main.Helpers
             public float RenderScale { get; }
         }
 
-        private const float BaseNameScale = 0.42f;
+        private const float BaseNameScale = 0.58f;
         private const float BaseBarWidth = 70f;
         private const float BaseBarHeight = 6f;
         private const float BaseBarOffsetY = 2f;
@@ -208,11 +208,22 @@ namespace Client.Main.Helpers
             float depth = MathHelper.Clamp(screen.Z, 0f, 1f);
             Vector2 textPos = new(nameRect.X + padX, nameRect.Y + padY);
 
-            spriteBatch.Draw(pixel, nameRect, null, Theme.BgDarkest * 0.85f, 0f, Vector2.Zero, SpriteEffects.None, depth);
-            DrawBorder(spriteBatch, pixel, nameRect, Theme.BorderOuter * 0.9f, depth);
+            // Fully opaque panel so the busy 3D scene never bleeds through the label.
+            spriteBatch.Draw(pixel, nameRect, null, Theme.BgDarkest, 0f, Vector2.Zero, SpriteEffects.None, depth);
+            DrawBorder(spriteBatch, pixel, nameRect, Theme.BorderOuter, depth);
 
-            spriteBatch.DrawString(font, name, textPos + new Vector2(1f, 1f), Color.Black * 0.7f, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
-            spriteBatch.DrawString(font, name, textPos, Theme.TextWhite, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            // Crisp readability: a solid dark outline in all 4 (+diagonal) directions around the
+            // glyphs, then the white text on top. Scales the outline offset with the font so it
+            // stays proportionate at any render scale.
+            float outline = MathF.Max(1f, 1.5f * scale);
+            Color outlineColor = Color.Black * 0.9f;
+            spriteBatch.DrawString(font, name, textPos + new Vector2(-outline, 0f), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos + new Vector2(outline, 0f), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos + new Vector2(0f, -outline), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos + new Vector2(0f, outline), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos + new Vector2(outline, outline), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos + new Vector2(-outline, -outline), outlineColor, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
+            spriteBatch.DrawString(font, name, textPos, Theme.TextGold, 0f, Vector2.Zero, nameScale, SpriteEffects.None, depth);
 
             if (hasBar)
             {

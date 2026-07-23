@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text;
 using Microsoft.Xna.Framework;
@@ -33,6 +33,18 @@ namespace Client.Main
 
         // Player movement
         public const float MOVE_SPEED = 300f; // 12 * 25 FPS
+
+        // Diagnostics (off): locomotion cadence log + attack-blend bone-scale log.
+        public const bool ANIM_LOCO_PROBE = false;
+        public const bool ANIM_BLEND_PROBE = false;
+        // Player walk/sink diagnosis (logcat [WALKPROBE]): lock/bodyHeight/root Z por ação.
+        public const bool WALKPROBE = false;
+        // Diagnóstico de fluidez: FPS médio + hitches por segundo (logcat [FPSPROBE]).
+        public const bool FPSPROBE = false;
+        // Attack-clip timing log (logcat [ATKPROBE]): native duration, cadence, resulting cycle.
+        public const bool ANIM_ATTACK_PROBE = true;
+        // Temporary: dump per-monster rest-pose skinned bounds at load (logcat [MODELDIAG]).
+        public const bool MODEL_DIAG = false;
 
         // UI base
         public const float BASE_FONT_SIZE = 25f;
@@ -187,7 +199,7 @@ namespace Client.Main
 
         // Paths
         public static string DataPath;
-        public static string DataPathUrl = "http://192.168.55.220/Data.zip";
+        public static string DataPathUrl = "http://192.168.1.7:8090/Data.zip";
         public static string DefaultDataPathUrl = "https://full-wkr.mu.webzen.co.kr/muweb/full/MU_Red_1_20_61_Full.zip";
         public static string SETTINGS_PATH = "appsettings.json";
 
@@ -195,6 +207,12 @@ namespace Client.Main
 
         // Supported fonts: Arial & NotoKR 
         public static string FONT_NAME = "Arial";
+        /// <summary>
+        /// Fonte NEGRITO. O MonoGame rasteriza a fonte num atlas de bitmap — não dá pra
+        /// engrossar em runtime como no CSS, então o negrito é uma fonte SEPARADA
+        /// (ArialBold.spritefont: mesmo arial.ttf, Style=Bold).
+        /// </summary>
+        public static string FONT_BOLD_NAME = "ArialBold";
         public static Encoding DATA_TEXT_ENCODING = Encoding.UTF8;
 
         static Constants()
@@ -229,7 +247,7 @@ namespace Client.Main
             OPTIMIZE_FOR_INTEGRATED_GPU = false;
             DEBUG_LIGHTING_AREAS = false;
             ENABLE_ITEM_MATERIAL_SHADER = true;
-            ENABLE_MONSTER_MATERIAL_SHADER = true;
+            ENABLE_MONSTER_MATERIAL_SHADER = Environment.GetEnvironmentVariable("MU_DISABLE_MONSTER_MATERIAL") != "1";
             ENABLE_WEAPON_TRAIL = true;
             ENABLE_BATCH_OPTIMIZED_SORTING = true;
             ENABLE_MAP_OBJECT_INSTANCING = true;
@@ -253,6 +271,14 @@ namespace Client.Main
             SHADOW_NORMAL_BIAS = 0.008f;
 
             DataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
+
+            // Harness de desenvolvimento (desktop): bootar direto num viewer de modelos e
+            // apontar o Data existente sem copiar 2GB. Env vars nunca definidas no Android.
+            string envDataPath = Environment.GetEnvironmentVariable("MU_DATA_PATH");
+            if (!string.IsNullOrEmpty(envDataPath))
+                DataPath = envDataPath;
+            if (Environment.GetEnvironmentVariable("MU_ENTRY_SCENE") == "MonsterViewer")
+                ENTRY_SCENE = typeof(Scenes.MonsterViewerScene);
         }
 
 #if DEBUG
@@ -261,7 +287,7 @@ namespace Client.Main
             DRAW_BOUNDING_BOXES = false;
             BACKGROUND_MUSIC = false;
             SOUND_EFFECTS = false;
-            SHOW_DEBUG_PANEL = true;
+            SHOW_DEBUG_PANEL = false;
         }
 #endif
     }

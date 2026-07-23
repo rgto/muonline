@@ -12,7 +12,7 @@ using System.Reflection;
 namespace Client.Main.Controls.UI.Game.Inventory
 {
     /// <summary>
-    /// Utility for generating simple 3D previews of BMD models with proper BlendState support.
+    /// Utility for generating simple 3D previews of ModelAsset models with proper BlendState support.
     /// </summary>
     public static class BmdPreviewRenderer
     {
@@ -573,7 +573,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             }
         }
 
-        private static List<int> GetMeshRenderOrder(Client.Data.BMD.BMD bmd)
+        private static List<int> GetMeshRenderOrder(Client.Data.Model.ModelAsset bmd)
         {
             var opaqueOrder = new List<int>();
             var transparentOrder = new List<int>();
@@ -599,7 +599,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
         }
 
         private static void RenderMeshWithBlendState(GraphicsDevice gd, BasicEffect effect,
-                                                   Client.Data.BMD.BMD bmd, int meshIdx,
+                                                   Client.Data.Model.ModelAsset bmd, int meshIdx,
                                                    Matrix[] bones)
         {
             var mesh = bmd.Meshes[meshIdx];
@@ -660,7 +660,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
         }
 
         private static void RenderMeshWithItemMaterialPreview(GraphicsDevice gd,
-                                                              Client.Data.BMD.BMD bmd,
+                                                              Client.Data.Model.ModelAsset bmd,
                                                               int meshIdx,
                                                               Matrix[] bones,
                                                               Matrix world,
@@ -747,7 +747,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             }
         }
 
-        private static BlendState GetBlendStateForMesh(Client.Data.BMD.BMDTextureMesh mesh)
+        private static BlendState GetBlendStateForMesh(Client.Data.Model.ModelMesh mesh)
         {
             if (string.IsNullOrEmpty(mesh.BlendingMode))
                 return null;
@@ -777,7 +777,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             return null;
         }
 
-        private static Matrix[] BuildBoneMatrices(Client.Data.BMD.BMD bmd, ItemDefinition definition = null)
+        private static Matrix[] BuildBoneMatrices(Client.Data.Model.ModelAsset bmd, ItemDefinition definition = null)
         {
             var bones = bmd.Bones;
             var result = new Matrix[bones.Length];
@@ -811,7 +811,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             return result;
         }
 
-        private static Matrix BuildSingleBoneMatrix(Client.Data.BMD.BMDTextureBone bone, Matrix[] parentResults)
+        private static Matrix BuildSingleBoneMatrix(Client.Data.Model.ModelBone bone, Matrix[] parentResults)
         {
             Matrix local = Matrix.Identity;
 
@@ -833,7 +833,7 @@ namespace Client.Main.Controls.UI.Game.Inventory
             return local;
         }
 
-        private static BoundingBox ComputeBounds(Client.Data.BMD.BMD bmd, Matrix[] bones)
+        private static BoundingBox ComputeBounds(Client.Data.Model.ModelAsset bmd, Matrix[] bones)
         {
             Vector3 min = new(float.MaxValue);
             Vector3 max = new(float.MinValue);

@@ -1,74 +1,105 @@
-﻿using Client.Main.Objects.Effects;
-using Client.Main.Models;
+using Client.Main.Objects.Effects;
 using Microsoft.Xna.Framework;
 using System.Threading.Tasks;
 
 namespace Client.Main.Objects
 {
+    /// <summary>
+    /// Âncora do marcador de clique-para-andar. O visual é 100% o efeito dourado
+    /// réplica do MU mobile (ClickPinShineEffect: espeto girando + faíscas + anéis);
+    /// o pin branco antigo (MoveTargetPosEffect.bmd) foi removido a pedido do usuário.
+    /// </summary>
     public class CursorObject : WorldObject
     {
-        public float _visibleTime = 0f;
-        private bool _effectHierarchyValidated;
+        private ClickCompassDecalEffect _compass;
+        private ClickPinShineEffect _shine;
 
         public override async Task Load()
         {
-            Scale = 0.7f;
-            EnsureSingleMoveTargetEffect();
-            _effectHierarchyValidated = true;
+            // Volume real: o culling do WorldControl usa frustum.Contains(BoundingBoxWorld);
+            // caixa zerada faz o objeto sumir.
+            BoundingBoxLocal = new BoundingBox(new Vector3(-80f, -80f, -20f),
+                                               new Vector3(80f, 80f, 80f));
             await base.Load();
         }
 
         public override void Update(GameTime gameTime)
         {
-            if (!_effectHierarchyValidated)
-            {
-                EnsureSingleMoveTargetEffect();
-                _effectHierarchyValidated = true;
-            }
-
-            if (_visibleTime > 0)
-            {
-                _visibleTime -= gameTime.ElapsedGameTime.Milliseconds;
-                Alpha = _visibleTime / 1500f;
-            }
-            else if (!Hidden)
-            {
-                Hidden = true;
-            }
-
+            // World só existe depois que o cursor entra no mundo — por isso o efeito
+            // é criado aqui (e no Show), não no Load().
+            EnsureClickEffects();
             base.Update(gameTime);
         }
 
         protected override void OnPositionChanged()
         {
             base.OnPositionChanged();
-            Hidden = false;
-            _visibleTime = 1500f;
-            Alpha = 1f;
+            Show();
         }
 
-        private void EnsureSingleMoveTargetEffect()
+        /// <summary>
+        /// Reacende o marcador. Chamar SEMPRE que houver clique de movimento: o setter de
+        /// Position só dispara OnPositionChanged quando o valor MUDA, então clicar de novo
+        /// no mesmo tile (ou repetir a posição) deixava a marca invisível.
+        /// </summary>
+        public void Show()
         {
-            MoveTargetPostEffectObject primaryEffect = null;
+            // O cursor nasce em (0,0,0), FORA do grid espacial de culling do mundo —
+            // o Update dele pode nunca ter rodado até o 1º clique. Garantir o efeito
+            // aqui (World já existe: setado no Objects.Add do mundo).
+            EnsureClickEffects();
 
-            for (int i = Children.Count - 1; i >= 0; i--)
+            Hidden = false;
+            Alpha = 1f;
+
+            // Os efeitos vivem na RAIZ do mundo (não são filhos): entram no passe
+            // transparente com Depth próprio e não herdam o alpha do cursor —
+            // recebem a posição na mão.
+            _compass?.PlayAt(Position);
+            _shine?.PlayAt(Position);
+        }
+
+        /// <summary>
+        /// Cria o efeito de clique (réplica do "dianji" do MU mobile) DIRETO em
+        /// World.Objects: como raiz ele tem classificação de passe/Depth próprios
+        /// (EffectObject é isento de culling e atualizado todo frame) e fica fora
+        /// da cadeia TotalAlpha do cursor.
+        /// </summary>
+        private void EnsureClickEffects()
+        {
+            if (World == null)
+                return;
+
+            if (_compass == null)
             {
-                if (Children[i] is not MoveTargetPostEffectObject effect)
-                    continue;
-
-                if (primaryEffect == null)
-                {
-                    primaryEffect = effect;
-                    continue;
-                }
-
-                Children.Remove(effect);
-                if (effect.Status != GameControlStatus.Disposed)
-                    effect.Dispose();
+                _compass = new ClickCompassDecalEffect();
+                World.Objects.Add(_compass);
             }
 
-            if (primaryEffect == null)
-                Children.Add(new MoveTargetPostEffectObject());
+            if (_shine == null)
+            {
+                _shine = new ClickPinShineEffect();
+                World.Objects.Add(_shine);
+            }
+        }
+
+        public override void Dispose()
+        {
+            // Os efeitos são raiz do mundo: sem isso, recriar o cursor no MESMO mundo
+            // deixaria órfãos acumulando em World.Objects.
+            if (_compass != null)
+            {
+                World?.RemoveObject(_compass);
+                _compass.Dispose();
+                _compass = null;
+            }
+            if (_shine != null)
+            {
+                World?.RemoveObject(_shine);
+                _shine.Dispose();
+                _shine = null;
+            }
+            base.Dispose();
         }
     }
 }

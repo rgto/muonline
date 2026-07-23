@@ -1,7 +1,7 @@
 using Client.Main.Models;
 using Client.Main.Objects.Player;
 using Microsoft.Xna.Framework;
-using Client.Data.BMD;
+using Client.Data.Model;
 using System;
 using System.Threading.Tasks;
 
@@ -9,7 +9,7 @@ namespace Client.Main.Objects.Worlds.Noria
 {
     public class RestPlaceObject : ModelObject
     {
-        private static readonly BMD _dummyBmd = new BMD();
+        private static readonly ModelAsset _dummyBmd = new ModelAsset();
 
         private bool isWaitingForPlayerArrival = false;
         private Vector2 targetTile;

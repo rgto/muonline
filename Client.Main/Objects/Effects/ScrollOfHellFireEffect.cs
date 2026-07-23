@@ -413,7 +413,7 @@ namespace Client.Main.Objects.Effects
             private const float Margin = 0.05f;
             private const float Scale = 1f - 2f * Margin; // 0.9
 
-            public Vector3 DeformVertex(in Client.Data.BMD.BMDTextureVertex vertex, in Vector3 transformedPosition)
+            public Vector3 DeformVertex(in Client.Data.Model.ModelVertex vertex, in Vector3 transformedPosition)
                 => transformedPosition;
 
             public Vector2 DeformTexCoord(float u, float v)
@@ -428,7 +428,7 @@ namespace Client.Main.Objects.Effects
         {
             public float OffsetU;
 
-            public Vector3 DeformVertex(in Client.Data.BMD.BMDTextureVertex vertex, in Vector3 transformedPosition)
+            public Vector3 DeformVertex(in Client.Data.Model.ModelVertex vertex, in Vector3 transformedPosition)
                 => transformedPosition;
 
             public Vector2 DeformTexCoord(float u, float v)

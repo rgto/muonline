@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Data.Texture;
 using Client.Main.Content;
 using Client.Main.Controllers;
@@ -85,6 +85,7 @@ namespace Client.Main.Objects
         private DynamicVertexBuffer[] _boneVertexBuffers;
         private DynamicIndexBuffer[] _boneIndexBuffers;
         private VertexBuffer[] _gpuSkinVertexBuffers;
+        private int _drawDiagOnce;
         private IndexBuffer[] _gpuSkinIndexBuffers;
         private int[] _gpuSkinBoneCounts;
         private bool[] _gpuSkinMeshEnabled;
@@ -216,11 +217,19 @@ namespace Client.Main.Objects
         protected Matrix[] BoneTransform { get; set; }
         public Matrix[] GetBoneTransforms() => BoneTransform;
         public int CurrentAction { get; set; }
+
+        /// <summary>
+        /// Converte o índice de ação (CurrentAction) para o índice REAL dentro do BMD
+        /// carregado deste objeto. Por padrão é identidade (o índice já é o do BMD).
+        /// O PlayerObject sobrescreve para reconciliar o enum compacto com o Player.bmd
+        /// original de 380 ações (ver PlayerActionBmdMap).
+        /// </summary>
+        protected virtual int ResolveActionIndex(int action) => action;
         public int CurrentFrame { get; private set; }
         public int ParentBoneLink { get; set; } = -1;
 
-        private BMD _model;
-        public BMD Model
+        private ModelAsset _model;
+        public ModelAsset Model
         {
             get => _model;
             set
@@ -244,6 +253,23 @@ namespace Client.Main.Objects
             {
                 if (ParentBoneLink >= 0 && Parent != null && Parent is ModelObject modelObject)
                 {
+                    var pm = modelObject.Model;
+                    // Pai glb da família aninhada: o índice hardcoded é do esqueleto do BMD
+                    // (ex. Lich ParentBoneLink=41 num bmd de 54 ossos; o glb tem 24). O
+                    // NativeBoneMap traduz por NOME. Além disso, BoneTransform de glb guarda
+                    // a matriz de SKIN (InverseBind*boneWorld*Root) — para ancorar um filho
+                    // rígido é preciso remover o InverseBind e normalizar a escala do Root
+                    // (~39x), senão a arma explode de tamanho.
+                    if (pm != null && pm.IsGltf && pm.NativeBmdBones != null)
+                    {
+                        // Attach clássico em corpo glb: compõe o mundo do osso DIRETO do
+                        // .bmd nativo (mesma matemática do cliente clássico), no
+                        // action/frame corrente do pai. As animações do glb são
+                        // retargeted 1:1 do bmd, então corpo e attach ficam em sincronia.
+                        return ComposeNativeBmdBoneWorld(pm.NativeBmdBones, ParentBoneLink,
+                            modelObject.CurrentAction, modelObject.CurrentFrame);
+                    }
+
                     if (modelObject.BoneTransform != null && ParentBoneLink < modelObject.BoneTransform.Length)
                     {
                         return modelObject.BoneTransform[ParentBoneLink];
@@ -251,6 +277,42 @@ namespace Client.Main.Objects
                 }
                 return Matrix.Identity;
             }
+        }
+
+
+        /// <summary>Mundo do osso <paramref name="boneIndex"/> do .bmd nativo no
+        /// action/frame dados — composição clássica (quaternion+posição, local×pai).</summary>
+        private static Matrix ComposeNativeBmdBoneWorld(Client.Data.BMD.BMDTextureBone[] bones, int boneIndex, int action, int frame)
+        {
+            if (bones == null || boneIndex < 0 || boneIndex >= bones.Length)
+                return Matrix.Identity;
+
+            Matrix world = Matrix.Identity;
+            // compõe a cadeia raiz->osso (profundidade máx. defensiva)
+            Span<int> chain = stackalloc int[64];
+            int depth = 0;
+            for (int b = boneIndex; b >= 0 && b < bones.Length && depth < 64; b = bones[b].Parent)
+                chain[depth++] = b;
+
+            for (int i = depth - 1; i >= 0; i--)
+            {
+                var bone = bones[chain[i]];
+                Matrix local = Matrix.Identity;
+                if (bone != Client.Data.BMD.BMDTextureBone.Dummy && bone.Matrixes != null && bone.Matrixes.Length > 0)
+                {
+                    int a = action >= 0 && action < bone.Matrixes.Length ? action : 0;
+                    var bm = bone.Matrixes[a];
+                    if ((bm.Position?.Length ?? 0) > 0 && (bm.Quaternion?.Length ?? 0) > 0)
+                    {
+                        int f = Math.Clamp(frame, 0, Math.Min(bm.Position.Length, bm.Quaternion.Length) - 1);
+                        var q = bm.Quaternion[f];
+                        local = Matrix.CreateFromQuaternion(new Quaternion(q.X, q.Y, q.Z, q.W));
+                        local.Translation = new Vector3(bm.Position[f].X, bm.Position[f].Y, bm.Position[f].Z);
+                    }
+                }
+                world = local * world;
+            }
+            return world;
         }
 
         public float BodyHeight { get; private set; }
@@ -422,7 +484,8 @@ namespace Client.Main.Objects
 
                 _meshIsRGBA[meshIndex] = _dataTextures[meshIndex]?.Components == 4;
                 _meshHiddenByScript[meshIndex] = _scriptTextures[meshIndex]?.HiddenMesh ?? false;
-                _meshBlendByScript[meshIndex] = _scriptTextures[meshIndex]?.Bright ?? false;
+                _meshBlendByScript[meshIndex] = (_scriptTextures[meshIndex]?.Bright ?? false)
+                    || IsGlowEffectTexture(texturePath);
             }
 
             _sortTextureHintDirty = true;
@@ -469,6 +532,21 @@ namespace Client.Main.Objects
             }
 
             UpdateBoundings();
+        }
+
+        /// <summary>
+        /// Texturas de efeito/brilho (arte grayscale sobre fundo preto) que o cliente
+        /// oficial desenha aditivas via tabela por-item. Sem a tabela, o clone as
+        /// renderizava OPACAS (blocos pretos em volta de armas mastery, ex. Blue Eye).
+        /// Casamento por nome — essas texturas são compartilhadas e inconfundíveis.
+        /// </summary>
+        private static bool IsGlowEffectTexture(string texturePath)
+        {
+            if (string.IsNullOrEmpty(texturePath))
+                return false;
+            string name = System.IO.Path.GetFileNameWithoutExtension(texturePath)
+                .ToLowerInvariant();
+            return name.Contains("mono") || name.Contains("line_fire");
         }
 
         public override void Update(GameTime gameTime)

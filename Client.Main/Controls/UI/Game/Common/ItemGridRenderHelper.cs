@@ -8,6 +8,24 @@ namespace Client.Main.Controls.UI.Game.Common
 {
     public static class ItemGridRenderHelper
     {
+        /// <summary>
+        /// Rect de desenho do ícone DENTRO do slot: margem uniforme + fit preservando a
+        /// proporção da textura, centrado. Ícone esticado borda-a-borda cobria a moldura
+        /// recuada da célula e distorcia sprites ("item vazando do slot").
+        /// </summary>
+        public static Rectangle FitRect(Rectangle slot, int texWidth, int texHeight, int margin)
+        {
+            int availW = Math.Max(1, slot.Width - margin * 2);
+            int availH = Math.Max(1, slot.Height - margin * 2);
+            if (texWidth <= 0 || texHeight <= 0)
+                return new Rectangle(slot.X + margin, slot.Y + margin, availW, availH);
+
+            float scale = Math.Min((float)availW / texWidth, (float)availH / texHeight);
+            int w = Math.Max(1, (int)(texWidth * scale));
+            int h = Math.Max(1, (int)(texHeight * scale));
+            return new Rectangle(slot.X + (slot.Width - w) / 2, slot.Y + (slot.Height - h) / 2, w, h);
+        }
+
         public static Point GetSlotAtScreenPosition(Rectangle displayRect, Rectangle gridRect, int columns, int rows, int squareWidth, int squareHeight, Point screenPos)
         {
             Point gridOrigin = new(displayRect.X + gridRect.X, displayRect.Y + gridRect.Y);
@@ -127,6 +145,14 @@ namespace Client.Main.Controls.UI.Game.Common
 
                 float scale = 0.24f;
                 Vector2 size = font.MeasureString(shortName) * scale;
+                // NUNCA estourar o slot: encolhe o texto pra caber na largura da célula
+                // (texto centralizado maior que o rect vazava pros vizinhos).
+                float maxW = rect.Width - 4f;
+                if (size.X > maxW && size.X > 0f)
+                {
+                    scale *= maxW / size.X;
+                    size = font.MeasureString(shortName) * scale;
+                }
                 Vector2 pos = new(rect.X + (rect.Width - size.X) / 2, rect.Y + (rect.Height - size.Y) / 2);
 
                 spriteBatch.DrawString(font, shortName, pos, textColor,

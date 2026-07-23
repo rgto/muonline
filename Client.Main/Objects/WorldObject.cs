@@ -353,15 +353,18 @@ namespace Client.Main.Objects
             if (screen.Z < 0f || screen.Z > 1f)
                 return;
 
-            // Apply render scale to font scale to maintain consistent size
-            const float baseScale = 0.4f; // 2x smaller than default
+            // Apply render scale to font scale to maintain consistent size. Kept in sync with the
+            // monster overhead nameplate (OverheadNameplateRenderer.BaseNameScale) for readability.
+            const float baseScale = 0.58f;
             float scale = baseScale * Constants.RENDER_SCALE;
             Vector2 size = _font.MeasureString(name) * scale;
             var sb = GraphicsManager.Instance.Sprite;
 
             Vector2 textPos = new Vector2(screen.X - size.X * 0.5f, screen.Y - size.Y);
-            Color bgColor = new Color(30, 50, 70, 150); // Semi-transparent dark blue background
-            Color textColor = new Color(176, 224, 230, 255); // Pale sky blue text
+            Color bgColor = new Color(8, 10, 14, 252);   // opaque dark panel so the scene doesn't bleed through
+            Color textColor = new Color(255, 220, 130);   // warm gold, high-contrast on the earthy scene
+            Color outlineColor = Color.Black * 0.9f;
+            float outline = MathF.Max(1f, 1.5f * scale);
 
             void draw()
             {
@@ -378,7 +381,11 @@ namespace Client.Main.Objects
                     (int)(size.Y + 4));
                 sb.Draw(_whiteTexture, bgRect, bgColor);
 
-                // Draw text on top
+                // Solid dark outline around the glyphs, then the gold text on top — crisp at any scale.
+                sb.DrawString(_font, name, textPos + new Vector2(-outline, 0f), outlineColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                sb.DrawString(_font, name, textPos + new Vector2(outline, 0f), outlineColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                sb.DrawString(_font, name, textPos + new Vector2(0f, -outline), outlineColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                sb.DrawString(_font, name, textPos + new Vector2(0f, outline), outlineColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
                 sb.DrawString(_font, name, textPos, textColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
             }
 

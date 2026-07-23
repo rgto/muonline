@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -36,7 +36,7 @@ namespace Client.Main.Objects.Player
         /// <summary>
         /// Returns true if this helm should keep the base head visible (face lives outside the helm).
         /// </summary>
-        public static bool RequiresBaseHead(string helmPath, BMD model)
+        public static bool RequiresBaseHead(string helmPath, ModelAsset model)
         {
             var candidate = GetModelNameCandidate(helmPath, model);
             if (string.IsNullOrWhiteSpace(candidate))
@@ -77,7 +77,7 @@ namespace Client.Main.Objects.Player
             return false;
         }
 
-        private static string GetModelNameCandidate(string helmPath, BMD model)
+        private static string GetModelNameCandidate(string helmPath, ModelAsset model)
         {
             var candidate = GetFileNameWithoutExtension(helmPath);
             if (!string.IsNullOrWhiteSpace(candidate))

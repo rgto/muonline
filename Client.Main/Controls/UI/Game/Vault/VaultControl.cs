@@ -28,21 +28,30 @@ namespace Client.Main.Controls.UI.Game
         // ═══════════════════════════════════════════════════════════════
         // WINDOW DIMENSIONS
         // ═══════════════════════════════════════════════════════════════
-        public const int Columns = 8;
-        public const int Rows = 15;
+        // 8 colunas = InventoryConstants.RowSize do servidor (stride do protocolo).
+        public static int Columns => Hud.VaultLayout.GridCols;
+        // TOTAL de linhas do baú no servidor (InventoryConstants.WarehouseRows).
+        public const int TotalRows = 15;
+        // Linhas VISÍVEIS por página (o resto fica nas outras abas).
+        public static int VisibleRows => Math.Min(Hud.VaultLayout.GridRows, TotalRows);
+        // Rows = total (grid lógico do servidor); a página só muda o que é EXIBIDO.
+        public static int Rows => TotalRows;
+        public static int PageCount => (int)Math.Ceiling(TotalRows / (float)Math.Max(1, VisibleRows));
+        private int _page;   // página atual (0-based)
+        private int PageFirstRow => _page * VisibleRows;
         private const int VAULT_SQUARE_WIDTH = 32;
         private const int VAULT_SQUARE_HEIGHT = 32;
+        // Margem só do ÍCONE dentro do footprint. O FUNDO do item preenche o footprint
+        // inteiro cravado nas linhas da grade (referência oficial do mobile: background
+        // alinhado com as linhas; recuar o fundo mostrava o slot atrás — rejeitado).
+        private const int ICON_INSET = 2;
 
-        private const int HEADER_HEIGHT = 46;
-        private const int SECTION_HEADER_HEIGHT = 22;
-        private const int GRID_PADDING = 10;
-        private const int FOOTER_HEIGHT = 50;
-        private const int WINDOW_MARGIN = 12;
-
+        // Dimensões dirigidas pelo VaultLayout (editor hud-edit-vault :5191).
+        private static int HEADER_HEIGHT => Hud.VaultLayout.DragBarH;
         private static readonly int GRID_WIDTH = Columns * VAULT_SQUARE_WIDTH;
-        private static readonly int GRID_HEIGHT = Rows * VAULT_SQUARE_HEIGHT;
-        private static readonly int WINDOW_WIDTH = GRID_WIDTH + GRID_PADDING * 2 + WINDOW_MARGIN * 2;
-        private static readonly int WINDOW_HEIGHT = HEADER_HEIGHT + SECTION_HEADER_HEIGHT + GRID_PADDING * 2 + GRID_HEIGHT + FOOTER_HEIGHT + WINDOW_MARGIN;
+        private static int GRID_HEIGHT => VisibleRows * VAULT_SQUARE_HEIGHT;
+        private static int WINDOW_WIDTH => Hud.VaultLayout.PanelW;
+        private static int WINDOW_HEIGHT => Hud.VaultLayout.PanelH;
 
         // ═══════════════════════════════════════════════════════════════
         // MODERN DARK THEME
@@ -102,11 +111,20 @@ namespace Client.Main.Controls.UI.Game
         private Rectangle _headerRect;
         private Rectangle _gridRect;
         private Rectangle _gridFrameRect;
+        private Rectangle _darkCardRect;
         private Rectangle _footerRect;
         private Rectangle _zenFieldRect;
+        private Rectangle _feeFieldRect;
         private Rectangle _depositButtonRect;
         private Rectangle _withdrawButtonRect;
+        private Rectangle _lockButtonRect;
+        private Rectangle _expandedButtonRect;
         private Rectangle _closeButtonRect;
+
+        // Assets do visual novo (mesmos do NPC Shop — sem patch).
+        private Texture2D _texPanel, _texRect, _texDarkCard, _texGridRow, _texField, _texVaultFrame, _texTab;
+        private Texture2D _texClose, _texCloseHover, _texOkCancel;
+        private bool _lockHovered, _expandedHovered;
 
         private RenderTarget2D _staticSurface;
         private bool _staticSurfaceDirty = true;
@@ -199,38 +217,92 @@ namespace Client.Main.Controls.UI.Game
 
         private void BuildLayoutMetrics()
         {
+            var L = typeof(Hud.VaultLayout); _ = L;
+
             _headerRect = new Rectangle(0, 0, WINDOW_WIDTH, HEADER_HEIGHT);
 
-            int gridFrameX = WINDOW_MARGIN;
-            int gridFrameY = HEADER_HEIGHT;
-            int gridFrameWidth = GRID_WIDTH + GRID_PADDING * 2;
-            int gridFrameHeight = SECTION_HEADER_HEIGHT + GRID_PADDING * 2 + GRID_HEIGHT;
-            _gridFrameRect = new Rectangle(gridFrameX, gridFrameY, gridFrameWidth, gridFrameHeight);
+            _gridFrameRect = new Rectangle((int)Hud.VaultLayout.CardX, (int)Hud.VaultLayout.CardY,
+                                           (int)Hud.VaultLayout.CardW, (int)Hud.VaultLayout.CardH);
+            _darkCardRect = new Rectangle((int)Hud.VaultLayout.DarkCardX, (int)Hud.VaultLayout.DarkCardY,
+                                          (int)Hud.VaultLayout.DarkCardW, (int)Hud.VaultLayout.DarkCardH);
+            _gridRect = new Rectangle((int)Hud.VaultLayout.GridX, (int)Hud.VaultLayout.GridY,
+                                      GRID_WIDTH, GRID_HEIGHT);
 
-            _gridRect = new Rectangle(
-                gridFrameX + GRID_PADDING,
-                gridFrameY + SECTION_HEADER_HEIGHT + GRID_PADDING,
-                GRID_WIDTH,
-                GRID_HEIGHT);
+            _closeButtonRect = new Rectangle((int)Hud.VaultLayout.CloseX, (int)Hud.VaultLayout.CloseY,
+                                             (int)Hud.VaultLayout.CloseW, (int)Hud.VaultLayout.CloseH);
 
-            _footerRect = new Rectangle(WINDOW_MARGIN, _gridFrameRect.Bottom + 4, _gridFrameRect.Width, FOOTER_HEIGHT - 8);
+            _zenFieldRect = new Rectangle((int)Hud.VaultLayout.ZenFieldX,
+                                          (int)(Hud.VaultLayout.ZenRowY - Hud.VaultLayout.ZenFieldH / 2f),
+                                          (int)Hud.VaultLayout.ZenFieldW, (int)Hud.VaultLayout.ZenFieldH);
+            _feeFieldRect = new Rectangle((int)Hud.VaultLayout.FeeFieldX,
+                                          (int)(Hud.VaultLayout.FeeRowY - Hud.VaultLayout.FeeFieldH / 2f),
+                                          (int)Hud.VaultLayout.FeeFieldW, (int)Hud.VaultLayout.FeeFieldH);
+            _footerRect = new Rectangle(0, _zenFieldRect.Y, WINDOW_WIDTH, _feeFieldRect.Bottom - _zenFieldRect.Y);
 
-            const int buttonWidth = 44;
-            const int buttonGap = 6;
-            const int fieldHeight = 28;
-            int fieldX = _footerRect.X + 36;
-            int fieldWidth = _footerRect.Width - (fieldX - _footerRect.X) - (buttonWidth * 2 + buttonGap * 2);
-            _zenFieldRect = new Rectangle(fieldX, _footerRect.Y + 8, fieldWidth, fieldHeight);
-            _depositButtonRect = new Rectangle(_zenFieldRect.Right + buttonGap, _zenFieldRect.Y, buttonWidth, fieldHeight);
-            _withdrawButtonRect = new Rectangle(_depositButtonRect.Right + buttonGap, _zenFieldRect.Y, buttonWidth, fieldHeight);
-            _closeButtonRect = new Rectangle(WINDOW_WIDTH - 30, 10, 20, 20);
+            // Fileira de 4 botões: Deposit / Withdraw / Lock / Expanded.
+            float bx = Hud.VaultLayout.BtnRowX, bw = Hud.VaultLayout.BtnW, bgap = Hud.VaultLayout.BtnGap;
+            int by = (int)Hud.VaultLayout.BtnRowY, bh = (int)Hud.VaultLayout.BtnH;
+            _depositButtonRect = new Rectangle((int)bx, by, (int)bw, bh);
+            _withdrawButtonRect = new Rectangle((int)(bx + (bw + bgap)), by, (int)bw, bh);
+            _lockButtonRect = new Rectangle((int)(bx + 2 * (bw + bgap)), by, (int)bw, bh);
+            _expandedButtonRect = new Rectangle((int)(bx + 3 * (bw + bgap)), by, (int)bw, bh);
         }
 
         public override async Task Load()
         {
             await base.Load();
             _font = GraphicsManager.Instance.Font;
+
+            var tl = TextureLoader.Instance;
+            async Task<Texture2D> L(string p) { try { return await tl.PrepareAndGetTexture(p); } catch { return null; } }
+            _texPanel = await L("Interface/Imprint/imprint_panel.OZP");
+            _texRect = await L("Interface/Inventory/inv_rect.OZP");
+            _texDarkCard = await L("Interface/Imprint/imprint_dark_card.OZP");
+            _texGridRow = await L("Interface/Inventory/inv_grid_row.OZP");
+            _texField = await L("Interface/Inventory/inv_field.OZP");
+            _texVaultFrame = await L("Interface/Inventory/inv_vault_frame.OZP");  // moldura VAZADA (moldura2.png)
+            _texTab = await L("Interface/Imprint/imprint_tab.OZP");               // aba vermelha (mesma do NPC Shop)
+            _texClose = await L("Interface/Imprint/imprint_close.OZP");
+            _texCloseHover = await L("Interface/Imprint/imprint_close_hover.OZP");
+            _texOkCancel = await L("Interface/CharCreate/ok_cancel.OZT");
+
             InvalidateStaticSurface();
+        }
+
+        private static bool Tex(Texture2D t) => t != null && !t.IsDisposed;
+
+        // 9-slice (borda m px) — moldura inv_rect (m=8).
+        private static void Draw9Slice(SpriteBatch sb, Texture2D tex, Rectangle dst, int m = 8)
+        {
+            int tw = tex.Width, th = tex.Height;
+            if (dst.Width < m * 2 + 2 || dst.Height < m * 2 + 2) { sb.Draw(tex, dst, Color.White); return; }
+            int cx = tw - 2 * m, cy = th - 2 * m;
+            int dcx = dst.Width - 2 * m, dcy = dst.Height - 2 * m;
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y, m, m), new Rectangle(0, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y, m, m), new Rectangle(tw - m, 0, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Bottom - m, m, m), new Rectangle(0, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Bottom - m, m, m), new Rectangle(tw - m, th - m, m, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y, dcx, m), new Rectangle(m, 0, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Bottom - m, dcx, m), new Rectangle(m, th - m, cx, m), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X, dst.Y + m, m, dcy), new Rectangle(0, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.Right - m, dst.Y + m, m, dcy), new Rectangle(tw - m, m, m, cy), Color.White);
+            sb.Draw(tex, new Rectangle(dst.X + m, dst.Y + m, dcx, dcy), new Rectangle(m, m, cx, cy), Color.White);
+        }
+
+        // Botão padrão do cliente: metade "Save" (verde) da folha ok_cancel 467x80.
+        private void DrawStandardButton(SpriteBatch sb, Rectangle r, string label, float fontSize, bool hovered)
+        {
+            if (Tex(_texOkCancel)) sb.Draw(_texOkCancel, r, new Rectangle(0, 0, 233, 80), Color.White * Alpha);
+            var pixel = GraphicsManager.Instance.Pixel;
+            if (hovered && pixel != null) sb.Draw(pixel, r, Color.White * 0.12f);
+            if (_font == null || string.IsNullOrEmpty(label)) return;
+            float s = fontSize / 25f;
+            Vector2 sz = _font.MeasureString(label) * s;
+            float maxW = r.Width - 8f;
+            if (sz.X > maxW && sz.X > 0f) { s *= maxW / sz.X; sz = _font.MeasureString(label) * s; }
+            var pos = new Vector2(r.X + (r.Width - sz.X) / 2f, r.Y + (r.Height - sz.Y) / 2f);
+            sb.DrawString(_font, label, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            sb.DrawString(_font, label, pos, new Color(230, 225, 215), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
         }
 
         public override void Update(GameTime gameTime)
@@ -370,6 +442,9 @@ namespace Client.Main.Controls.UI.Game
 
             var wdrRect = Translate(_withdrawButtonRect);
             _withdrawHovered = wdrRect.Contains(mousePos);
+
+            _lockHovered = Translate(_lockButtonRect).Contains(mousePos);
+            _expandedHovered = Translate(_expandedButtonRect).Contains(mousePos);
         }
 
         public override void Draw(GameTime gameTime)
@@ -398,6 +473,7 @@ namespace Client.Main.Controls.UI.Game
                 DrawGridOverlays(spriteBatch);
                 DrawVaultItems(spriteBatch);
                 DrawCloseButton(spriteBatch);
+                DrawPageTabs(spriteBatch);
                 DrawZenButtons(spriteBatch);
                 DrawZenText(spriteBatch);
             }
@@ -492,7 +568,12 @@ namespace Client.Main.Controls.UI.Game
 
         public Point GetSlotAtScreenPosition(Point screenPos)
         {
-            return ItemGridRenderHelper.GetSlotAtScreenPosition(DisplayRectangle, _gridRect, Columns, Rows, VAULT_SQUARE_WIDTH, VAULT_SQUARE_HEIGHT, screenPos);
+            // Converte a posição da TELA (linhas visíveis da página) para o slot LÓGICO
+            // do servidor somando a linha inicial da página.
+            var local = ItemGridRenderHelper.GetSlotAtScreenPosition(DisplayRectangle, _gridRect, Columns, VisibleRows,
+                                                                     VAULT_SQUARE_WIDTH, VAULT_SQUARE_HEIGHT, screenPos);
+            if (local.X < 0 || local.Y < 0) return new Point(-1, -1);
+            return new Point(local.X, local.Y + PageFirstRow);
         }
 
         public bool CanPlaceAt(Point gridSlot, InventoryItem item)
@@ -587,15 +668,19 @@ namespace Client.Main.Controls.UI.Game
             var gd = GraphicsManager.Instance?.GraphicsDevice;
             if (gd == null) return;
 
+            // SUPERAMOSTRADA na resolução física (lição do inventário: texto nítido).
+            float k = MathF.Max(1f, UiScaler.Scale * Constants.RENDER_SCALE);
             _staticSurface?.Dispose();
-            _staticSurface = new RenderTarget2D(gd, WINDOW_WIDTH, WINDOW_HEIGHT, false, SurfaceFormat.Color, DepthFormat.None);
+            _staticSurface = new RenderTarget2D(gd, (int)MathF.Ceiling(WINDOW_WIDTH * k), (int)MathF.Ceiling(WINDOW_HEIGHT * k),
+                                                false, SurfaceFormat.Color, DepthFormat.None);
 
             var previousTargets = gd.GetRenderTargets();
             gd.SetRenderTarget(_staticSurface);
             gd.Clear(Color.Transparent);
 
             var spriteBatch = GraphicsManager.Instance.Sprite;
-            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend))
+            using (new SpriteBatchScope(spriteBatch, SpriteSortMode.Deferred, BlendState.AlphaBlend,
+                       GraphicsManager.GetQualityLinearSamplerState(), transform: Matrix.CreateScale(k, k, 1f)))
             {
                 DrawStaticElements(spriteBatch);
             }
@@ -612,10 +697,70 @@ namespace Client.Main.Controls.UI.Game
             if (pixel == null) return;
 
             var fullRect = new Rectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-            DrawWindowBackground(spriteBatch, fullRect);
-            DrawModernHeader(spriteBatch);
-            DrawModernGridSection(spriteBatch);
-            DrawModernFooter(spriteBatch);
+
+            // 1. Painel-template (barra de título assada). Fallback: fundo antigo.
+            if (Tex(_texPanel)) spriteBatch.Draw(_texPanel, fullRect, Color.White);
+            else DrawWindowBackground(spriteBatch, fullRect);
+
+            // 2. Título sobre a barra.
+            if (Hud.VaultLayout.TitleTextEnabled && _font != null)
+            {
+                string title = Hud.VaultLayout.TitleMessage;
+                float ts = Hud.VaultLayout.TitleTextFont / 25f;
+                Vector2 size = _font.MeasureString(title) * ts;
+                var pos = new Vector2(Hud.VaultLayout.TitleTextX - size.X / 2f, Hud.VaultLayout.TitleTextY - size.Y / 2f);
+                spriteBatch.DrawString(_font, title, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+                spriteBatch.DrawString(_font, title, pos, new Color(235, 210, 150), 0f, Vector2.Zero, ts, SpriteEffects.None, 0f);
+            }
+
+            // 3. Dark card — peça INDEPENDENTE (posição/tamanho próprios).
+            if (Hud.VaultLayout.DarkCardEnabled && Tex(_texDarkCard))
+                spriteBatch.Draw(_texDarkCard, _darkCardRect, Color.White);
+            if (Tex(_texGridRow))
+            {
+                // A arte tem 8 células: a 1ª traz a borda ESQUERDA e a 8ª a DIREITA.
+                // Usar (c % 8) fazia a 9ª coluna repetir a célula-de-borda → GAP visível.
+                // Mapa correto p/ qualquer nº de colunas: 0 = primeira, 7 = última,
+                // miolo cicla só entre as células internas (1..6).
+                const int SRC_CELLS = 8;
+                int cellSrcW = _texGridRow.Width / SRC_CELLS;
+                for (int r = 0; r < VisibleRows; r++)
+                {
+                    for (int c = 0; c < Columns; c++)
+                    {
+                        int srcIdx = c == 0 ? 0
+                                   : c == Columns - 1 ? SRC_CELLS - 1
+                                   : 1 + ((c - 1) % (SRC_CELLS - 2));
+                        var cell = new Rectangle(_gridRect.X + c * VAULT_SQUARE_WIDTH,
+                                                 _gridRect.Y + r * VAULT_SQUARE_HEIGHT,
+                                                 VAULT_SQUARE_WIDTH, VAULT_SQUARE_HEIGHT);
+                        var src = new Rectangle(cellSrcW * srcIdx, 0, cellSrcW, _texGridRow.Height);
+                        spriteBatch.Draw(_texGridRow, cell, src, Color.White);
+                    }
+                }
+            }
+
+            // 3b. Moldura VAZADA — peça INDEPENDENTE, por cima da grade (miolo transparente).
+            if (Hud.VaultLayout.CardEnabled && Tex(_texVaultFrame))
+                Draw9Slice(spriteBatch, _texVaultFrame, _gridFrameRect, 30);
+
+            // 4. Linhas Zen / Storage fee: rótulo + campo (arte de input padrão).
+            if (Hud.VaultLayout.ZenRowEnabled)
+                DrawFieldRow(spriteBatch, "Zen", Hud.VaultLayout.ZenLabelX, Hud.VaultLayout.ZenRowY, _zenFieldRect);
+            if (Hud.VaultLayout.FeeRowEnabled)
+                DrawFieldRow(spriteBatch, "Storage fee", Hud.VaultLayout.FeeLabelX, Hud.VaultLayout.FeeRowY, _feeFieldRect);
+        }
+
+        // Rótulo dourado + moldura do campo (o VALOR é dinâmico, desenhado por cima).
+        private void DrawFieldRow(SpriteBatch sb, string label, float labelX, float rowY, Rectangle field)
+        {
+            if (Tex(_texField)) sb.Draw(_texField, field, Color.White);
+            if (_font == null) return;
+            float s = Hud.VaultLayout.ZenFont / 25f;
+            Vector2 sz = _font.MeasureString(label) * s;
+            var pos = new Vector2(labelX, rowY - sz.Y / 2f);
+            sb.DrawString(_font, label, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            sb.DrawString(_font, label, pos, new Color(230, 200, 110), 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
         }
 
         private void DrawModernHeader(SpriteBatch spriteBatch)
@@ -724,14 +869,19 @@ namespace Client.Main.Controls.UI.Game
             if (pixel == null) return;
 
             var rect = Translate(_closeButtonRect);
-            Color btnColor = _closeHovered ? Theme.Accent : Theme.TextGray;
+            var tex = _closeHovered && Tex(_texCloseHover) ? _texCloseHover : _texClose;
+            if (Tex(tex))
+            {
+                spriteBatch.Draw(tex, rect, Color.White * Alpha);
+                return;
+            }
 
-            // Draw X symbol
+            // Fallback: X procedural
+            Color btnColor = _closeHovered ? Theme.Accent : Theme.TextGray;
             int cx = rect.X + rect.Width / 2;
             int cy = rect.Y + rect.Height / 2;
             int halfSize = 6;
             int thickness = 2;
-
             for (int i = -halfSize; i <= halfSize; i++)
             {
                 spriteBatch.Draw(pixel, new Rectangle(cx + i - thickness / 2, cy + i - thickness / 2, thickness, thickness), btnColor);
@@ -757,22 +907,104 @@ namespace Client.Main.Controls.UI.Game
 
             string zenText = _isZenInputActive
                 ? $"{(_zenMoveDirection == VaultMoveMoneyRequest.VaultMoneyMoveDirection.InventoryToVault ? "IN" : "OUT")}: {(_zenInputText.Length == 0 ? "0" : _zenInputText)}{(_zenInputShowCursor ? "|" : string.Empty)}"
-                : _vaultZen.ToString();
-            float scale = 0.35f;
-            Vector2 size = _font.MeasureString(zenText) * scale;
-            Vector2 pos = new(zenRect.X + 8, zenRect.Y + (zenRect.Height - size.Y) / 2);
+                : _vaultZen.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
 
-            spriteBatch.DrawString(_font, zenText, pos, Theme.TextGold * Alpha,
+            // Alinhado à DIREITA crescendo pra esquerda (padrão dos campos de moeda),
+            // com auto-shrink pra nunca estourar o campo.
+            float scale = Hud.VaultLayout.ZenFont / 25f;
+            Vector2 size = _font.MeasureString(zenText) * scale;
+            float maxW = zenRect.Width - 16f;
+            if (size.X > maxW && size.X > 0f) { scale *= maxW / size.X; size = _font.MeasureString(zenText) * scale; }
+            Vector2 pos = new(zenRect.Right - 8f - size.X, zenRect.Y + (zenRect.Height - size.Y) / 2);
+
+            spriteBatch.DrawString(_font, zenText, pos + Vector2.One, Color.Black * 0.6f,
                                   0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            spriteBatch.DrawString(_font, zenText, pos, new Color(212, 62, 42) * Alpha,
+                                  0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+
+            // Storage fee (dado do servidor; sem taxa configurada = 0).
+            var feeRect = Translate(_feeFieldRect);
+            string feeText = "0";
+            float fs = Hud.VaultLayout.ZenFont / 25f;
+            Vector2 fsz = _font.MeasureString(feeText) * fs;
+            Vector2 fpos = new(feeRect.Right - 8f - fsz.X, feeRect.Y + (feeRect.Height - fsz.Y) / 2);
+            spriteBatch.DrawString(_font, feeText, fpos + Vector2.One, Color.Black * 0.6f,
+                                  0f, Vector2.Zero, fs, SpriteEffects.None, 0f);
+            spriteBatch.DrawString(_font, feeText, fpos, new Color(212, 62, 42) * Alpha,
+                                  0f, Vector2.Zero, fs, SpriteEffects.None, 0f);
+        }
+
+        // Abas de página (1, 2, ...) — como nas lojas de NPC. Desenhadas AO VIVO
+        // porque a aba ativa muda sem invalidar a superfície estática.
+        private void DrawPageTabs(SpriteBatch spriteBatch)
+        {
+            if (!Hud.VaultLayout.PageTabsEnabled || _font == null || PageCount <= 1) return;
+            var pixel = GraphicsManager.Instance.Pixel;
+
+            for (int i = 0; i < PageCount; i++)
+            {
+                var r = Translate(PageTabRect(i));
+                bool active = i == _page;
+
+                // Aba VERMELHA — mesma arte do NPC Shop (imprint_tab). Inativa fica esmaecida.
+                if (Tex(_texTab))
+                    spriteBatch.Draw(_texTab, r, Color.White * (active ? 1f : 0.6f) * Alpha);
+                else if (Tex(_texOkCancel))
+                    spriteBatch.Draw(_texOkCancel, r, new Rectangle(0, 0, 233, 80), Color.White * (active ? 1f : 0.55f) * Alpha);
+
+                string lbl = (i + 1).ToString();
+                float s = Hud.VaultLayout.PageTabFont / 25f;
+                var sz = _font.MeasureString(lbl) * s;
+                var pos = new Vector2(r.X + (r.Width - sz.X) / 2f, r.Y + (r.Height - sz.Y) / 2f);
+                spriteBatch.DrawString(_font, lbl, pos + Vector2.One, Color.Black * 0.6f, 0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+                spriteBatch.DrawString(_font, lbl, pos, active ? new Color(235, 210, 150) : new Color(170, 160, 145),
+                                       0f, Vector2.Zero, s, SpriteEffects.None, 0f);
+            }
+        }
+
+        private static Rectangle PageTabRect(int i)
+            => new((int)(Hud.VaultLayout.PageTabX + i * (Hud.VaultLayout.PageTabW + Hud.VaultLayout.PageTabGap)),
+                   (int)Hud.VaultLayout.PageTabY,
+                   (int)Hud.VaultLayout.PageTabW, (int)Hud.VaultLayout.PageTabH);
+
+        // Clique nas abas: troca a página exibida (slots do servidor não mudam).
+        private bool HandlePageTabClick(Point mousePos)
+        {
+            if (!Hud.VaultLayout.PageTabsEnabled || PageCount <= 1) return false;
+            for (int i = 0; i < PageCount; i++)
+            {
+                if (!Translate(PageTabRect(i)).Contains(mousePos)) continue;
+                if (_page != i)
+                {
+                    _page = i;
+                    SoundController.Instance.PlayBuffer("Sound/iButton.wav");
+                }
+                return true;
+            }
+            return false;
         }
 
         private void DrawZenButtons(SpriteBatch spriteBatch)
         {
-            var pixel = GraphicsManager.Instance.Pixel;
-            if (pixel == null || _font == null) return;
+            if (!Hud.VaultLayout.ButtonsEnabled || _font == null) return;
 
-            DrawZenButton(spriteBatch, _depositButtonRect, "IN", _depositHovered, VaultMoveMoneyRequest.VaultMoneyMoveDirection.InventoryToVault);
-            DrawZenButton(spriteBatch, _withdrawButtonRect, "OUT", _withdrawHovered, VaultMoveMoneyRequest.VaultMoneyMoveDirection.VaultToInventory);
+            float f = Hud.VaultLayout.BtnFont;
+            DrawStandardButton(spriteBatch, Translate(_depositButtonRect), Hud.VaultLayout.Btn1Label, f, _depositHovered);
+            DrawStandardButton(spriteBatch, Translate(_withdrawButtonRect), Hud.VaultLayout.Btn2Label, f, _withdrawHovered);
+            DrawStandardButton(spriteBatch, Translate(_lockButtonRect), Hud.VaultLayout.Btn3Label, f, _lockHovered);
+            DrawStandardButton(spriteBatch, Translate(_expandedButtonRect), Hud.VaultLayout.Btn4Label, f, _expandedHovered);
+
+            // Realce da direção ativa do movimento de Zen (IN = Deposit, OUT = Withdraw).
+            var pixel = GraphicsManager.Instance.Pixel;
+            if (_isZenInputActive && pixel != null)
+            {
+                var active = _zenMoveDirection == VaultMoveMoneyRequest.VaultMoneyMoveDirection.InventoryToVault
+                    ? Translate(_depositButtonRect) : Translate(_withdrawButtonRect);
+                spriteBatch.Draw(pixel, new Rectangle(active.X, active.Y, active.Width, 2), Theme.Accent);
+                spriteBatch.Draw(pixel, new Rectangle(active.X, active.Bottom - 2, active.Width, 2), Theme.Accent);
+                spriteBatch.Draw(pixel, new Rectangle(active.X, active.Y, 2, active.Height), Theme.Accent);
+                spriteBatch.Draw(pixel, new Rectangle(active.Right - 2, active.Y, 2, active.Height), Theme.Accent);
+            }
         }
 
         private void DrawZenButton(SpriteBatch spriteBatch, Rectangle localRect, string label, bool hovered, VaultMoveMoneyRequest.VaultMoneyMoveDirection direction)
@@ -833,12 +1065,31 @@ namespace Client.Main.Controls.UI.Game
                 }
             }
 
-            // Hovered slot highlight (when not dragging item)
-            if (activeDragged == null)
+            // Sem highlight de hover/célula fora do drag (mobile é touch; o quadrado claro
+            // ficava preso no último toque e usava dims cruas — "vazava" do slot).
+        }
+
+        // Dimensões EFETIVAS do item na grade (só VISUAL — drag/moves continuam com as
+        // dims reais): clampa na borda da grade, no FIM DA PÁGINA visível (item 2x2+ na
+        // última linha da página desenhava por cima da moldura/Zen) e no vizinho ocupado.
+        // Mesmo padrão do EffectiveGridDims do InventoryControl.
+        private (int W, int H) EffectiveVaultDims(InventoryItem item, int rowOnPage)
+        {
+            int x = item.GridPosition.X, y = item.GridPosition.Y;
+            int defW = Math.Max(1, item.Definition?.Width ?? 1);
+            int defH = Math.Max(1, item.Definition?.Height ?? 1);
+            int w = Math.Min(defW, Columns - x);
+            int h = Math.Min(defH, Math.Min(Rows - y, VisibleRows - rowOnPage));
+
+            foreach (var other in _items)
             {
-                ItemGridRenderHelper.DrawGridOverlays(spriteBatch, pixel, DisplayRectangle, _gridRect, _hoveredItem, _hoveredSlot,
-                                 VAULT_SQUARE_WIDTH, VAULT_SQUARE_HEIGHT, Theme.SlotHover, Theme.Secondary, Alpha);
+                if (ReferenceEquals(other, item)) continue;
+                int ox = other.GridPosition.X, oy = other.GridPosition.Y;
+                if (oy >= y && oy < y + defH && ox > x) w = Math.Min(w, ox - x);
+                if (ox >= x && ox < x + defW && oy > y) h = Math.Min(h, oy - y);
             }
+
+            return (Math.Max(1, w), Math.Max(1, h));
         }
 
         private void DrawVaultItems(SpriteBatch spriteBatch)
@@ -852,43 +1103,54 @@ namespace Client.Main.Controls.UI.Game
             {
                 if (item == _draggedItem) continue;
 
+                // Só desenha o que pertence à PÁGINA atual.
+                int rowOnPage = item.GridPosition.Y - PageFirstRow;
+                if (rowOnPage < 0 || rowOnPage >= VisibleRows) continue;
+
+                var (effW, effH) = EffectiveVaultDims(item, rowOnPage);
                 var rect = new Rectangle(
                     gridOrigin.X + item.GridPosition.X * VAULT_SQUARE_WIDTH,
-                    gridOrigin.Y + item.GridPosition.Y * VAULT_SQUARE_HEIGHT,
-                    item.Definition.Width * VAULT_SQUARE_WIDTH,
-                    item.Definition.Height * VAULT_SQUARE_HEIGHT);
+                    gridOrigin.Y + rowOnPage * VAULT_SQUARE_HEIGHT,
+                    effW * VAULT_SQUARE_WIDTH,
+                    effH * VAULT_SQUARE_HEIGHT);
 
+                // FUNDO alinhado ao footprint (cravado nas linhas da grade, como o mobile
+                // oficial); só o ÍCONE tem margem, e o glow fica DENTRO (nunca por cima
+                // dos vizinhos — era isso que "vazava do slot").
                 bool isHovered = item == _hoveredItem;
-                Texture2D texture = ResolveItemTexture(item, rect.Width, rect.Height, isHovered, allowGenerate: true);
+                Texture2D texture = ResolveItemTexture(item, rect.Width - ICON_INSET * 2, rect.Height - ICON_INSET * 2, isHovered, allowGenerate: true);
 
-                // Glow similar to inventory
-                Color glowColor = ItemUiHelper.GetItemGlowColor(item, GlowPalette);
-                if (glowColor.A > 0 || isHovered)
-                {
-                    Color finalGlow = isHovered ? Color.Lerp(glowColor, Theme.Accent, 0.4f) : glowColor;
-                    finalGlow.A = (byte)Math.Min(255, finalGlow.A + (isHovered ? 40 : 0));
-                    ItemUiHelper.DrawItemGlow(spriteBatch, pixel, rect, finalGlow);
-                }
-
-                // Cell background
+                // Cell background — footprint inteiro (1px de folga pra linha da grade).
                 if (pixel != null)
                 {
                     var bgRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
                     spriteBatch.Draw(pixel, bgRect, isHovered ? Theme.SlotHover : Theme.SlotBg);
                 }
 
+                // Glow similar to inventory — para DENTRO, sem cobrir a linha da grade.
+                Color glowColor = ItemUiHelper.GetItemGlowColor(item, GlowPalette);
+                if (glowColor.A > 0 || isHovered)
+                {
+                    Color finalGlow = isHovered ? Color.Lerp(glowColor, Theme.Accent, 0.4f) : glowColor;
+                    finalGlow.A = (byte)Math.Min(255, finalGlow.A + (isHovered ? 40 : 0));
+                    var glowRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
+                    ItemUiHelper.DrawItemGlow(spriteBatch, pixel, glowRect, finalGlow);
+                }
+
                 if (texture != null)
                 {
-                    spriteBatch.Draw(texture, rect, Color.White * Alpha);
+                    Rectangle iconRect = ItemGridRenderHelper.FitRect(rect, texture.Width, texture.Height, ICON_INSET);
+                    spriteBatch.Draw(texture, iconRect, Color.White * Alpha);
 
                     if (JewelShineOverlay.ShouldShine(item))
                     {
-                        jewelEntries.Add((item, rect));
+                        jewelEntries.Add((item, iconRect));
                     }
                 }
                 else if (pixel != null)
                 {
-                    ItemGridRenderHelper.DrawItemPlaceholder(spriteBatch, pixel, font, rect, item, Theme.BgLight, Theme.TextGray * 0.8f);
+                    var phRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
+                    ItemGridRenderHelper.DrawItemPlaceholder(spriteBatch, pixel, font, phRect, item, Theme.BgLight, Theme.TextGray * 0.8f);
                 }
 
                 if (font != null && item.Definition.BaseDurability == 0 && item.Definition.MagicDurability == 0 && item.Durability > 1)
@@ -939,7 +1201,7 @@ namespace Client.Main.Controls.UI.Game
             Point mouse = MuGame.Instance.UiMouseState.Position;
             var itemRect = new Rectangle(
                 DisplayRectangle.X + _gridRect.X + _hoveredItem.GridPosition.X * VAULT_SQUARE_WIDTH,
-                DisplayRectangle.Y + _gridRect.Y + _hoveredItem.GridPosition.Y * VAULT_SQUARE_HEIGHT,
+                DisplayRectangle.Y + _gridRect.Y + (_hoveredItem.GridPosition.Y - PageFirstRow) * VAULT_SQUARE_HEIGHT,
                 _hoveredItem.Definition.Width * VAULT_SQUARE_WIDTH,
                 _hoveredItem.Definition.Height * VAULT_SQUARE_HEIGHT);
 
@@ -1085,8 +1347,11 @@ namespace Client.Main.Controls.UI.Game
             if (item == null)
                 return;
 
-            int w = item.Definition.Width * VAULT_SQUARE_WIDTH;
-            int h = item.Definition.Height * VAULT_SQUARE_HEIGHT;
+            // MESMO tamanho que o hover do DrawVaultItems pede (dims efetivas - inset).
+            int rowOnPage = item.GridPosition.Y - PageFirstRow;
+            var (effW, effH) = EffectiveVaultDims(item, Math.Max(0, rowOnPage));
+            int w = effW * VAULT_SQUARE_WIDTH - ICON_INSET * 2;
+            int h = effH * VAULT_SQUARE_HEIGHT - ICON_INSET * 2;
             var key = (item, w, h, true);
             if (_bmdPreviewCache.TryGetValue(key, out var existing) && existing != null)
             {
@@ -1136,9 +1401,12 @@ namespace Client.Main.Controls.UI.Game
             if (dropSlot.X >= 0 && CanPlaceAt(dropSlot, _draggedItem))
             {
                 PlaceDraggedItem(dropSlot);
-                int w = _draggedItem.Definition.Width * VAULT_SQUARE_WIDTH;
-                int h = _draggedItem.Definition.Height * VAULT_SQUARE_HEIGHT;
-                _ = ResolveItemTexture(_draggedItem, w, h, animated: Constants.ENABLE_ITEM_MATERIAL_ANIMATION);
+                // MESMO tamanho que o DrawVaultItems pede (dims efetivas - inset).
+                int dropRow = _draggedItem.GridPosition.Y - PageFirstRow;
+                var (dw, dh) = EffectiveVaultDims(_draggedItem, Math.Max(0, dropRow));
+                _ = ResolveItemTexture(_draggedItem,
+                    dw * VAULT_SQUARE_WIDTH - ICON_INSET * 2, dh * VAULT_SQUARE_HEIGHT - ICON_INSET * 2,
+                    animated: Constants.ENABLE_ITEM_MATERIAL_ANIMATION);
                 if (dropSlot != _draggedOriginalSlot)
                 {
                     SendVaultMove(_draggedOriginalSlot, dropSlot);
@@ -1279,11 +1547,17 @@ namespace Client.Main.Controls.UI.Game
             {
                 if (item == _draggedItem) continue;
 
+                // Só considera itens da PÁGINA visível.
+                int rowOnPage = item.GridPosition.Y - PageFirstRow;
+                if (rowOnPage < 0 || rowOnPage >= VisibleRows) continue;
+
+                // Mesmas dims EFETIVAS do desenho, pro hover casar com o visual.
+                var (effW, effH) = EffectiveVaultDims(item, rowOnPage);
                 var rect = new Rectangle(
                     gridOrigin.X + item.GridPosition.X * VAULT_SQUARE_WIDTH,
-                    gridOrigin.Y + item.GridPosition.Y * VAULT_SQUARE_HEIGHT,
-                    item.Definition.Width * VAULT_SQUARE_WIDTH,
-                    item.Definition.Height * VAULT_SQUARE_HEIGHT);
+                    gridOrigin.Y + rowOnPage * VAULT_SQUARE_HEIGHT,
+                    effW * VAULT_SQUARE_WIDTH,
+                    effH * VAULT_SQUARE_HEIGHT);
 
                 if (rect.Contains(mousePos)) return item;
             }
@@ -1433,6 +1707,12 @@ namespace Client.Main.Controls.UI.Game
                 return false;
             }
 
+            // Abas de página têm prioridade (ficam acima da grade).
+            if (HandlePageTabClick(MuGame.Instance.UiMouseState.Position))
+            {
+                return true;
+            }
+
             if (_depositHovered)
             {
                 BeginZenInput(VaultMoveMoneyRequest.VaultMoneyMoveDirection.InventoryToVault);
@@ -1442,6 +1722,13 @@ namespace Client.Main.Controls.UI.Game
             if (_withdrawHovered)
             {
                 BeginZenInput(VaultMoveMoneyRequest.VaultMoneyMoveDirection.VaultToInventory);
+                return true;
+            }
+
+            // Lock / Expanded: sem pacote no OpenMU ainda — consomem o clique (placeholder).
+            if (_lockHovered || _expandedHovered)
+            {
+                SoundController.Instance.PlayBuffer("Sound/iButton.wav");
                 return true;
             }
 
@@ -1607,8 +1894,13 @@ namespace Client.Main.Controls.UI.Game
 
             foreach (var item in _items)
             {
-                int w = item.Definition.Width * VAULT_SQUARE_WIDTH;
-                int h = item.Definition.Height * VAULT_SQUARE_HEIGHT;
+                // MESMO tamanho que o DrawVaultItems pede (dims efetivas - inset de 2px),
+                // senão o warmup povoa uma chave de cache que nunca é usada.
+                int rowOnPage = item.GridPosition.Y - PageFirstRow;
+                if (rowOnPage < 0 || rowOnPage >= VisibleRows) continue;
+                var (effW, effH) = EffectiveVaultDims(item, rowOnPage);
+                int w = effW * VAULT_SQUARE_WIDTH - ICON_INSET * 2;
+                int h = effH * VAULT_SQUARE_HEIGHT - ICON_INSET * 2;
                 _ = ResolveItemTexture(item, w, h, animated: false);
             }
         }

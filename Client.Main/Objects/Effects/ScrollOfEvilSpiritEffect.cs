@@ -1,7 +1,7 @@
 #nullable enable
 using System;
 using System.Threading.Tasks;
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Main.Content;
 using Client.Main.Controllers;
 using Client.Main.Controls;
@@ -76,7 +76,7 @@ namespace Client.Main.Objects.Effects
         private readonly EvilSpiritGhostModel?[] _spiritHeadBlurA = new EvilSpiritGhostModel?[SpiritCount];
         private readonly EvilSpiritGhostModel?[] _spiritHeadBlurB = new EvilSpiritGhostModel?[SpiritCount];
         private string _laserModelPath = DefaultLaserModelPath;
-        private BMD? _laserModel;
+        private ModelAsset? _laserModel;
         private bool _laserPathResolved;
         private bool _spiritHeadsSpawned;
 
@@ -561,7 +561,7 @@ namespace Client.Main.Objects.Effects
 
         private void EnsureHeadLayer(
             ref EvilSpiritGhostModel? layer,
-            BMD model,
+            ModelAsset model,
             Vector3 position,
             float scale,
             float alphaMin,
@@ -828,7 +828,7 @@ namespace Client.Main.Objects.Effects
 
         private sealed class EvilSpiritGhostModel : ModelObject
         {
-            private readonly BMD _model;
+            private readonly ModelAsset _model;
             private readonly float _alphaMin;
             private readonly float _alphaMax;
             private readonly float _brightnessFactor;
@@ -836,7 +836,7 @@ namespace Client.Main.Objects.Effects
             protected override bool AllowLightingUpdates => false;
 
             public EvilSpiritGhostModel(
-                BMD model,
+                ModelAsset model,
                 float scale,
                 float alphaMin,
                 float alphaMax,

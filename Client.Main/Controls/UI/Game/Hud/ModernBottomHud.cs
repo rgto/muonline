@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Main.Content;
 using Client.Main.Controllers;
 using Client.Main.Controls.UI.Common;
@@ -86,8 +86,27 @@ namespace Client.Main.Controls.UI.Game.Hud
         private int _pendingAssignSlot = -1;
         private bool _quickSlotsRestored;
 
+        // ── Conjuntos da tela Skill Imprint (Set 1 = 4 skills, Set 2 = 7 skills) ─────
+        // Dois conjuntos guardados independentes; o ATIVO é copiado pra _slotSkills[3..]
+        // (o que o combate/hotbar usa) e define quantas skills a barra de ataque exibe.
+        public static readonly int[] SetSlotCounts = { 4, 7 };
+        private readonly ushort?[][] _imprintSets =
+        {
+            new ushort?[4],   // Set 1
+            new ushort?[7],   // Set 2
+        };
+        private int _activeSet = 1;   // default = Set 2 (7), layout atual
+
+        /// <summary>Set ativo (0 = Set 1 / 4 skills, 1 = Set 2 / 7 skills).</summary>
+        public int ActiveSet => _activeSet;
+        /// <summary>Quantas skills a barra de ataque deve exibir (4 ou 7), conforme o set ativo.</summary>
+        public int VisibleSkillCount => SetSlotCounts[_activeSet];
+
         // Potion slot assignments (Q=0, W=1, E=2) — stores item type
-        private readonly (byte Group, int Id)?[] _potionAssignments = new (byte, int)?[PotionSlotCount];
+        /// <summary>Slots da hotbar de ITENS (tela Skill Settings + barra inferior touch):
+        /// os 3 primeiros são as poções Q/W/E do desktop; 5 no total.</summary>
+        public const int ItemHotbarSlotCount = 5;
+        private readonly (byte Group, int Id)?[] _potionAssignments = new (byte, int)?[ItemHotbarSlotCount];
         private readonly Dictionary<string, Texture2D> _potionTextureCache = new();
         private const int PotionIconCacheSize = 48; // fixed size for BMD preview caching
 
@@ -121,13 +140,28 @@ namespace Client.Main.Controls.UI.Game.Hud
 
         public SkillEntryState? SelectedSkill => _slotSkills[_activeSkillSlot];
 
+        /// <summary>Skills atribuídas aos slots de hotbar 1-0 (índices 3..12), pra os botões de toque.</summary>
+        public System.Collections.Generic.IReadOnlyList<SkillEntryState?> HotbarSkills
+        {
+            get
+            {
+                var list = new SkillEntryState?[SlotCount - PotionSlotCount];
+                for (int i = PotionSlotCount; i < SlotCount; i++)
+                    list[i - PotionSlotCount] = _slotSkills[i];
+                return list;
+            }
+        }
+
         public ModernBottomHud(CharacterState state, SkillSelectionPanel skillPanel)
         {
             _state = state;
             _skillPanel = skillPanel;
 
             AutoViewSize = false;
-            Interactive = true;
+            // No mobile o HUD antigo é headless (não desenha nem captura toque) — só
+            // mantém o estado dos slots de skill. Não-interativo evita comer toques na
+            // área inferior (agora ocupada pela UI mobile).
+            Interactive = !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
             BackgroundColor = Color.Transparent;
             BorderColor = Color.Transparent;
             BorderThickness = 0;
@@ -172,6 +206,13 @@ namespace Client.Main.Controls.UI.Game.Hud
         public override void Draw(GameTime gameTime)
         {
             if (Status != GameControlStatus.Ready || !Visible)
+                return;
+
+            // No mobile o HUD inferior antigo NÃO é desenhado — a UI mobile (MU Immortal:
+            // joystick, barras HP/MP no topo, cluster de ataque/skill) substitui ele.
+            // O controle segue existindo apenas como dono do estado dos slots de skill
+            // (SelectedSkill/HotbarSkills), consumido pelos botões de toque e pelo skill controller.
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
                 return;
 
             var spriteBatch = GraphicsManager.Instance.Sprite;
@@ -385,8 +426,16 @@ namespace Client.Main.Controls.UI.Game.Hud
 
         private void EnsurePotionIconsCached()
         {
-            // Pre-generate BMD previews (outside SpriteBatch scope) using fixed cache size
-            for (int i = 0; i < PotionSlotCount; i++)
+            // NÃO gerar previews enquanto o mundo carrega: BMDLoader/RenderTarget em paralelo
+            // com o load da cena causa SIGSEGV nativo no Android (crash na abertura do jogo
+            // quando já existem poções persistidas). Só gera com a cena pronta.
+            var world = Scene?.World;
+            if (world == null || world.Status != GameControlStatus.Ready) return;
+
+            // Pre-generate BMD previews (outside SpriteBatch scope) using fixed cache size.
+            // TODOS os slots de item (5 — ItemHotbarSlotCount), não só os 3 do bar desktop:
+            // a barra mobile (BottomBarControl) desenha os 5.
+            for (int i = 0; i < _potionAssignments.Length; i++)
             {
                 var assignment = _potionAssignments[i];
                 if (assignment == null) continue;
@@ -410,6 +459,268 @@ namespace Client.Main.Controls.UI.Game.Hud
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Atribui uma skill aprendida ao primeiro slot LIVRE da hotbar (usado pelo painel
+        /// de skills do touch HUD). Se a hotbar estiver cheia, substitui o slot ativo.
+        /// Persiste como os quick slots do desktop.
+        /// </summary>
+        public void AssignSkillToHotbar(SkillEntryState skill)
+        {
+            if (skill == null)
+                return;
+
+            // Já equipada → só ativa o slot dela.
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+            {
+                if (_slotSkills[i]?.SkillId == skill.SkillId)
+                {
+                    _activeSkillSlot = i;
+                    PersistQuickSlots();
+                    return;
+                }
+            }
+
+            int target = -1;
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+            {
+                if (_slotSkills[i] == null) { target = i; break; }
+            }
+            if (target < 0)
+                target = _activeSkillSlot >= PotionSlotCount ? _activeSkillSlot : PotionSlotCount;
+
+            _slotSkills[target] = skill;
+            _activeSkillSlot = target;
+            PersistQuickSlots();
+        }
+
+        /// <summary>Remove a skill da hotbar (toque no painel numa skill já equipada).</summary>
+        public void RemoveSkillFromHotbar(ushort skillId)
+        {
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+            {
+                if (_slotSkills[i]?.SkillId == skillId)
+                {
+                    _slotSkills[i] = null;
+                    if (_activeSkillSlot == i)
+                        EnsureActiveSkillSelection(null);
+                    PersistQuickSlots();
+                    return;
+                }
+            }
+        }
+
+        /// <summary>Item (Group,Id) atribuído ao slot N da hotbar de itens (0..4).</summary>
+        public (byte Group, int Id)? GetItemAssignmentAt(int index) =>
+            index >= 0 && index < _potionAssignments.Length ? _potionAssignments[index] : null;
+
+        /// <summary>Atribui (ou limpa, com null) o item do slot N da hotbar de itens.</summary>
+        public void SetItemAssignmentAt(int index, (byte Group, int Id)? assignment)
+        {
+            if (index < 0 || index >= _potionAssignments.Length)
+                return;
+            _potionAssignments[index] = assignment;
+            PersistQuickSlots();
+        }
+
+        /// <summary>Total do item no inventário (soma de stacks) — p/ contadores de UI.</summary>
+        public int CountItemInInventory(byte group, int id) => CountPotionInInventory(group, id);
+
+        /// <summary>Consumíveis do inventário que podem ir num slot de poção (agrupados por
+        /// tipo). Usado pela tela Potion Imprint pra listar o que o char pode equipar.
+        /// Reusa exatamente o mecanismo do picker antigo (BuildPotionCandidates).</summary>
+        public System.Collections.Generic.IReadOnlyList<(byte Group, int Id, string Name, string? TexturePath, int Count)> GetConsumableCandidates()
+        {
+            BuildPotionCandidates();
+            var list = new System.Collections.Generic.List<(byte, int, string, string?, int)>();
+            foreach (var c in _potionCandidates)
+                list.Add((c.Group, c.Id, c.Name, c.TexturePath, c.Count));
+            return list;
+        }
+
+        /// <summary>Pré-gera (fora do SpriteBatch — chamar no Update) os previews BMD dos
+        /// candidatos de consumível. A tela Potion Imprint desenha via GetItemIconByKey, que
+        /// só devolve preview JÁ cacheado — sem isso os ícones saem nulos (só a contagem).</summary>
+        public void EnsureConsumableIconsCached()
+        {
+            // Mesmo guard do EnsurePotionIconsCached: nada de gerar preview com o mundo carregando.
+            var world = Scene?.World;
+            if (world == null || world.Status != GameControlStatus.Ready) return;
+
+            BuildPotionCandidates();
+            foreach (var candidate in _potionCandidates)
+            {
+                var def = ItemDatabase.GetItemDefinition(candidate.Group, (short)candidate.Id);
+                if (def?.TexturePath != null && def.TexturePath.EndsWith(".bmd", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (BmdPreviewRenderer.TryGetCachedPreview(def, PotionIconCacheSize, PotionIconCacheSize) == null)
+                        BmdPreviewRenderer.GetPreview(def, PotionIconCacheSize, PotionIconCacheSize);
+                }
+            }
+        }
+
+        /// <summary>Ícone 2D de um consumível por (group,id) — resolve a definição e a textura.</summary>
+        public Texture2D? GetItemIconByKey(byte group, int id) =>
+            ResolveItemIcon(ItemDatabase.GetItemDefinition(group, (short)id));
+
+        /// <summary>Ícone 2D do item (textura direta ou preview BMD cacheado).</summary>
+        public Texture2D? GetItemIcon(ItemDefinition? def) => ResolveItemIcon(def);
+
+        /// <summary>Consome o item do slot N da hotbar de itens (manda pro servidor).</summary>
+        public void ConsumeItemAt(int index) => ConsumePotionInSlot(index);
+
+        /// <summary>Skill no slot N da hotbar de skills (0..9 = teclas 1..0) — usado pela
+        /// tela de configuração (roda do Skill Settings).</summary>
+        public SkillEntryState? GetHotbarSkillAt(int hotbarIndex)
+        {
+            int i = PotionSlotCount + hotbarIndex;
+            return hotbarIndex >= 0 && i < SlotCount ? _slotSkills[i] : null;
+        }
+
+        /// <summary>Atribui a skill diretamente ao slot N da hotbar de skills, removendo a
+        /// duplicata se ela já estiver em outro slot. Persiste como os quick slots.</summary>
+        public void SetHotbarSkillAt(int hotbarIndex, SkillEntryState skill)
+        {
+            int target = PotionSlotCount + hotbarIndex;
+            if (hotbarIndex < 0 || target >= SlotCount || skill == null)
+                return;
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+            {
+                if (i != target && _slotSkills[i]?.SkillId == skill.SkillId)
+                    _slotSkills[i] = null;
+            }
+            _slotSkills[target] = skill;
+            PersistQuickSlots();
+        }
+
+        /// <summary>Limpa o slot N da hotbar de skills.</summary>
+        public void ClearHotbarSkillAt(int hotbarIndex)
+        {
+            int i = PotionSlotCount + hotbarIndex;
+            if (hotbarIndex < 0 || i >= SlotCount)
+                return;
+            _slotSkills[i] = null;
+            if (_activeSkillSlot == i)
+                EnsureActiveSkillSelection(null);
+            PersistQuickSlots();
+        }
+
+        // ── API dos conjuntos da tela Skill Imprint ─────────────────────────────────
+
+        /// <summary>Nº de slots de um set (0 → 4, 1 → 7).</summary>
+        public int GetSetSlotCount(int set) => (set >= 0 && set < SetSlotCounts.Length) ? SetSlotCounts[set] : 0;
+
+        /// <summary>Skill guardada no slot idx do set (resolvida contra as aprendidas), ou null.</summary>
+        public SkillEntryState? GetSetSkillAt(int set, int idx)
+        {
+            if (set < 0 || set >= _imprintSets.Length) return null;
+            var arr = _imprintSets[set];
+            if (idx < 0 || idx >= arr.Length) return null;
+            ushort? id = arr[idx];
+            if (!id.HasValue) return null;
+            return _state.GetSkills().FirstOrDefault(s => s.SkillId == id.Value);
+        }
+
+        /// <summary>Grava a skill no slot idx do set (remove duplicata dentro do mesmo set).
+        /// Se o set for o ativo, reflete já no hotbar de combate.</summary>
+        public void SetSetSkillAt(int set, int idx, SkillEntryState skill)
+        {
+            if (set < 0 || set >= _imprintSets.Length || skill == null) return;
+            var arr = _imprintSets[set];
+            if (idx < 0 || idx >= arr.Length) return;
+            for (int i = 0; i < arr.Length; i++)
+                if (i != idx && arr[i] == skill.SkillId) arr[i] = null;   // dedupe no set
+            arr[idx] = skill.SkillId;
+            PersistImprintSets();
+            if (set == _activeSet) ApplyActiveSetToHotbar();
+        }
+
+        /// <summary>Limpa o slot idx do set.</summary>
+        public void ClearSetSkillAt(int set, int idx)
+        {
+            if (set < 0 || set >= _imprintSets.Length) return;
+            var arr = _imprintSets[set];
+            if (idx < 0 || idx >= arr.Length) return;
+            arr[idx] = null;
+            PersistImprintSets();
+            if (set == _activeSet) ApplyActiveSetToHotbar();
+        }
+
+        /// <summary>Zera todos os slots do set.</summary>
+        public void ClearSet(int set)
+        {
+            if (set < 0 || set >= _imprintSets.Length) return;
+            Array.Clear(_imprintSets[set]);
+            PersistImprintSets();
+            if (set == _activeSet) ApplyActiveSetToHotbar();
+        }
+
+        /// <summary>Torna o set o ATIVO: copia suas skills pro hotbar de combate e ajusta a
+        /// contagem visível (4 ou 7). Persiste tudo.</summary>
+        public void ActivateSet(int set)
+        {
+            if (set < 0 || set >= _imprintSets.Length) return;
+            _activeSet = set;
+            PersistImprintSets();
+            ApplyActiveSetToHotbar();
+        }
+
+        // Mapa Set 1 slot (tela Imprint, índice 0..3) → índice do arco da hotbar (0..6).
+        // O Set 2 é 1:1 (slot i → arco i). O Set 1 tem 4 slots em posições visuais que NÃO
+        // são as 4 primeiras do arco: derivado casando cada Set1 slot com o Set2 slot mais
+        // próximo (cujo mapeamento pro arco é conhecido e correto). Sem isso a skill do Set 1
+        // caía em posição errada na hotbar.
+        private static readonly int[] Set1ToArc = { 2, 1, 3, 0 };
+
+        // Copia o set ativo pra _slotSkills[3..] (o combate lê daí). Slots além da
+        // contagem do set ficam vazios, então a barra de ataque exibe só 4 ou 7.
+        private void ApplyActiveSetToHotbar()
+        {
+            var arr = _imprintSets[_activeSet];
+            // limpa os 10 slots de skill
+            for (int i = 0; i < SlotCount - PotionSlotCount; i++)
+                _slotSkills[PotionSlotCount + i] = null;
+            // copia cada slot do set pro índice de arco correto
+            for (int i = 0; i < arr.Length; i++)
+            {
+                ushort? id = arr[i];
+                if (!id.HasValue) continue;
+                int arcIdx = (_activeSet == 0) ? Set1ToArc[i] : i;   // Set1 usa o mapa; Set2 é 1:1
+                if (arcIdx < 0 || arcIdx >= SlotCount - PotionSlotCount) continue;
+                _slotSkills[PotionSlotCount + arcIdx] =
+                    _state.GetSkills().FirstOrDefault(s => s.SkillId == id.Value);
+            }
+            // NÃO injetar skill automática aqui: o hotbar deve refletir EXATAMENTE o set
+            // (antes, EnsureActiveSkillSelection punha a 1ª skill aprendida no slot 3 vazio,
+            // fazendo Falling Slash aparecer sozinho). Só reaponta o slot ativo pra um
+            // preenchido, ou pro primeiro slot se o set estiver vazio.
+            SelectFirstFilledSlotOrDefault();
+            PersistQuickSlots();
+        }
+
+        // Aponta _activeSkillSlot pro slot atual (se tiver skill) ou pro primeiro preenchido;
+        // se nenhum tiver, volta pro slot 3. NUNCA insere skill (ao contrário de
+        // EnsureActiveSkillSelection).
+        private void SelectFirstFilledSlotOrDefault()
+        {
+            if (_activeSkillSlot >= PotionSlotCount && _activeSkillSlot < SlotCount &&
+                _slotSkills[_activeSkillSlot] != null)
+                return;
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+                if (_slotSkills[i] != null) { _activeSkillSlot = i; return; }
+            _activeSkillSlot = PotionSlotCount;
+        }
+
+        /// <summary>True se a skill está em algum slot da hotbar.</summary>
+        public bool IsSkillOnHotbar(ushort skillId)
+        {
+            for (int i = PotionSlotCount; i < SlotCount; i++)
+            {
+                if (_slotSkills[i]?.SkillId == skillId)
+                    return true;
+            }
+            return false;
         }
 
         private void OnSkillSelectedFromPanel(SkillEntryState skill)
@@ -448,7 +759,7 @@ namespace Client.Main.Controls.UI.Game.Hud
                     }
                 }
 
-                for (int i = 0; i < Math.Min(PotionSlotCount, savedPotionSlots.Length); i++)
+                for (int i = 0; i < Math.Min(_potionAssignments.Length, savedPotionSlots.Length); i++)
                 {
                     _potionAssignments[i] = savedPotionSlots[i];
                 }
@@ -457,6 +768,18 @@ namespace Client.Main.Controls.UI.Game.Hud
                 {
                     _activeSkillSlot = activeSkillSlot;
                 }
+            }
+
+            // Conjuntos da tela Skill Imprint: se existirem, são a fonte de verdade do
+            // hotbar. Carrega os dois sets + o ativo e aplica o ativo no combate.
+            if (MuGame.TryLoadImprintSets(characterName, out int activeSet, out ushort?[] loadedSet1, out ushort?[] loadedSet2))
+            {
+                Array.Copy(loadedSet1, _imprintSets[0], Math.Min(loadedSet1.Length, _imprintSets[0].Length));
+                Array.Copy(loadedSet2, _imprintSets[1], Math.Min(loadedSet2.Length, _imprintSets[1].Length));
+                _activeSet = (activeSet >= 0 && activeSet < _imprintSets.Length) ? activeSet : 1;
+                _quickSlotsRestored = true;   // ApplyActiveSetToHotbar → PersistQuickSlots precisa disso
+                ApplyActiveSetToHotbar();
+                return;
             }
 
             EnsureActiveSkillSelection(learnedSkills.Values.FirstOrDefault());
@@ -505,6 +828,14 @@ namespace Client.Main.Controls.UI.Game.Hud
             }
 
             MuGame.PersistQuickSlotAssignments(characterName, _activeSkillSlot, skillIds, _potionAssignments);
+        }
+
+        private void PersistImprintSets()
+        {
+            if (!_quickSlotsRestored) return;
+            string? characterName = GetPersistentCharacterName();
+            if (string.IsNullOrWhiteSpace(characterName)) return;
+            MuGame.PersistImprintSets(characterName, _activeSet, _imprintSets[0], _imprintSets[1]);
         }
 
         private string? GetPersistentCharacterName()
@@ -1114,7 +1445,8 @@ namespace Client.Main.Controls.UI.Game.Hud
                 iconBounds.Y + (iconBounds.Height - drawH) / 2,
                 drawW,
                 drawH);
-            sb.Draw(tex, iconDest, frame.SourceRectangle, Color.White);
+            // Source rect is 256-space; rescale to the actual OZJ resolution (4K remaster).
+            sb.Draw(tex, iconDest, SkillIconAtlas.ScaleToTexture(frame.SourceRectangle, tex), Color.White);
         }
 
         private void DrawInterfaceButtons(SpriteBatch sb, Texture2D pixel)

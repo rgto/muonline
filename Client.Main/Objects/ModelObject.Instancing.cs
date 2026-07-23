@@ -1,4 +1,4 @@
-using Client.Data.BMD;
+using Client.Data.Model;
 using Client.Main.Content;
 using Client.Main.Controls;
 using Client.Main.Controllers;
@@ -23,7 +23,7 @@ namespace Client.Main.Objects
 
         private readonly struct StaticMapInstancingBatchKey : IEquatable<StaticMapInstancingBatchKey>
         {
-            public StaticMapInstancingBatchKey(BMD model, int meshIndex, Texture2D texture, bool twoSided)
+            public StaticMapInstancingBatchKey(ModelAsset model, int meshIndex, Texture2D texture, bool twoSided)
             {
                 Model = model;
                 MeshIndex = meshIndex;
@@ -31,7 +31,7 @@ namespace Client.Main.Objects
                 TwoSided = twoSided;
             }
 
-            public BMD Model { get; }
+            public ModelAsset Model { get; }
             public int MeshIndex { get; }
             public Texture2D Texture { get; }
             public bool TwoSided { get; }
@@ -63,7 +63,7 @@ namespace Client.Main.Objects
         private readonly struct MonsterCrowdInstancingBatchKey : IEquatable<MonsterCrowdInstancingBatchKey>
         {
             public MonsterCrowdInstancingBatchKey(
-                BMD model,
+                ModelAsset model,
                 int meshIndex,
                 Texture2D texture,
                 bool twoSided,
@@ -82,7 +82,7 @@ namespace Client.Main.Objects
                 InterpolationBucket = interpolationBucket;
             }
 
-            public BMD Model { get; }
+            public ModelAsset Model { get; }
             public int MeshIndex { get; }
             public Texture2D Texture { get; }
             public bool TwoSided { get; }
@@ -359,6 +359,9 @@ namespace Client.Main.Objects
                 gd.BlendState = BlendState.Opaque;
                 gd.SamplerStates[0] = GraphicsManager.GetQualityLinearSamplerState();
 
+                bool crowdDiag = Environment.GetEnvironmentVariable("MU_BUF_DIAG") == "1" &&
+                                 MuGame.FrameIndex % 120 == 0;
+
                 for (int i = 0; i < _monsterCrowdInstancingActiveBatches.Count; i++)
                 {
                     var batch = _monsterCrowdInstancingActiveBatches[i];
@@ -372,7 +375,10 @@ namespace Client.Main.Objects
                         continue;
                     }
 
-                    if (!batch.PoseSource.TryUploadGpuSkinBoneMatrices(effect, batch.BoneCount))
+                    bool uploaded = batch.PoseSource.TryUploadGpuSkinBoneMatrices(effect, batch.BoneCount);
+                    if (crowdDiag)
+                        Console.WriteLine($"[CROWDDIAG] {batch.PoseSource.Model?.Name} inst={instanceCount} bones={batch.BoneCount} upload={uploaded} dls={Constants.ENABLE_DYNAMIC_LIGHTING_SHADER} tech={effect.CurrentTechnique?.Name}");
+                    if (!uploaded)
                         continue;
 
                     EnsureInstanceUploadBuffer(batch, instanceCount);
